@@ -27,8 +27,10 @@ repo, then reply to the message that appears.
 
 ## Setup
 
-1. **Get the APK.** Every push builds one. In the Actions tab, open the latest **Build** run and download
-   `aiauto-debug-apk`. Install it on your phone (you'll need to allow installs from that source).
+1. **Get the APK.** Download `aiauto-vX.Y.Z.apk` from the latest
+   [release](https://github.com/mjparinas/aiauto/releases) and install it on your phone. You'll need to allow
+   installs from that source. Every push also builds an APK, which you can find under the **Build** run's
+   Artifacts in the Actions tab.
 2. **Claude API key.** Create one at [platform.claude.com](https://platform.claude.com). Usage is billed to that
    account. The model is Claude Opus 5.5, and each task is a Managed Agents session.
 3. **GitHub token.** Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for
@@ -51,6 +53,17 @@ Requires JDK 17 and the Android SDK (API 35).
 ```
 ./gradlew :core:test :app:assembleDebug
 ```
+
+## Making a release
+
+Push a version tag, and the **Release** workflow builds the APK and publishes it:
+
+```
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Releases are signed with the CI runner's temporary debug key. Android might refuse to install a new version over
+an old one; if it does, uninstall the old one first. A fixed signing key stored as a repo secret would solve this.
 
 ## Limits worth knowing
 
