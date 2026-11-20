@@ -18,10 +18,15 @@ as messages that the car reads aloud.
   calls, and the task engine that keeps one session per task.
 - **`app/`** is the Android app:
   - The phone UI uses Jetpack Compose with a warm paper-and-clay theme.
-  - The car UI uses the Android for Cars App Library: a task list, task details and a repo picker.
+  - The car UI uses the Android for Cars App Library. It opens on one big **Talk** button; the task list,
+    task details and repo picker are behind **Tasks** in the corner.
   - Each task is posted as a messaging notification. Android Auto reads these aloud and accepts voice replies.
 
-Voice input works right on the car screen. Tap **New task** and pick a repo, or open a task and tap **Reply**,
+Tap **Talk** on the car screen and say anything. Claude (Opus 5.5, low effort for quick answers) replies out loud
+through the car speakers, and can start a coding task in one of your saved repos or answer a running task when you
+ask it to. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
+
+Voice input also works inside tasks: open **Tasks**, then tap **New task** and pick a repo, or open a task and tap **Reply**,
 then speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
 doesn't work, you can fall back to replying to the AIAuto message through Android Auto's messaging flow.
 
@@ -60,7 +65,8 @@ aloud, ducking your music while it talks. You can turn this off in Settings.
    - Tap **Version** ten times to unlock developer settings.
    - In the ⋮ menu, open **Developer settings** and turn on **Unknown sources**.
 
-   Messaging notifications work without this step.
+   Then disconnect and reconnect the phone. Without this step the app's icon doesn't appear in the car at all.
+   Messaging notifications work without it.
 
 ## Building locally
 
