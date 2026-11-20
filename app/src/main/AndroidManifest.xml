@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Keeps tasks running after Android Auto disconnects and the screen turns off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Installs new versions downloaded from the app's GitHub releases. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -69,6 +72,10 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
+                <!-- Android Auto treats an app that also posts messaging notifications as a messaging app.
+                     Without the MESSAGING category it opens only its built-in messages view and never this
+                     screen. With it, the app icon opens the templated screen (templated messaging). -->
+                <category android:name="androidx.car.app.category.MESSAGING" />
                 <category android:name="androidx.car.app.category.IOT" />
             </intent-filter>
         </service>

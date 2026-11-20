@@ -40,12 +40,30 @@ private sealed interface Screen {
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf<Screen>(Screen.Home)
 
+    /**
+     * Asks once to lift battery limits. Without it, Android (Samsung especially) can stop the app soon after
+     * Android Auto disconnects, which stops Claude's running tasks.
+     */
+    @android.annotation.SuppressLint("BatteryLife")
+    private fun askToRunInBackground() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (TaskService.isUnrestricted(this) || prefs.getBoolean("asked_battery", false)) return
+        prefs.edit().putBoolean("asked_battery", true).apply()
+        runCatching {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(android.net.Uri.parse("package:$packageName")),
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The microphone is for speaking requests from the car screen.
         val permissions = listOfNotNull(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS.takeIf { Build.VERSION.SDK_INT >= 33 })
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(permissions.toTypedArray())
+        askToRunInBackground()
         val g = graph
         screen = intent.taskTarget() ?: if (g.isConfigured) Screen.Home else Screen.Settings
 
