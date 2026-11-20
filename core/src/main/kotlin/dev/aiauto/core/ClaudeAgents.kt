@@ -333,7 +333,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
             SessionUpdateParams.builder()
                 .limitBudget(
                     BetaMonetaryAmount.builder()
-                        .amount(String.format(java.util.Locale.US, "%.2f", maxUsd.coerceAtLeast(0.01)))
+                        .amount(Money.toCents(maxUsd))
                         .currency(BetaCurrency.USD)
                         .build(),
                 )
@@ -345,8 +345,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
         costOf(client.beta().sessions().retrieve(sessionId).usage().listCost())
 
     private fun costOf(amount: Optional<BetaMonetaryAmount>): Double? =
-        // List cost is reported in US dollars.
-        amount.orElse(null)?.let { runCatching { it.amount().toDouble() }.getOrNull() }
+        amount.orElse(null)?.let { runCatching { Money.fromCents(it.amount()) }.getOrNull() }
 
     private fun eventId(json: Optional<com.anthropic.core.JsonValue>): String? =
         json.flatMap { it.asObject() }.flatMap { obj -> Optional.ofNullable(obj["id"]).flatMap { it.asString() } }.orElse(null)

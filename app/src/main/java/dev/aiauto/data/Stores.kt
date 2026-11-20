@@ -101,6 +101,18 @@ class Settings(context: Context) {
 
     private fun today() = java.time.LocalDate.now().toString()
 
+    /**
+     * Builds before this fix read the API's cents as dollars, so saved costs are 100 times too high.
+     * Scales today's total and every task's cost down once.
+     */
+    @Synchronized
+    fun fixCostUnits(tasks: FileTaskStore) {
+        if (prefs.getInt("cost_units", 1) >= 2) return
+        if (prefs.contains("spend_usd")) prefs.edit().putFloat("spend_usd", prefs.getFloat("spend_usd", 0f) / 100f).apply()
+        tasks.all().filter { it.costUsd > 0 }.forEach { tasks.put(it.copy(costUsd = it.costUsd / 100)) }
+        prefs.edit().putInt("cost_units", 2).apply()
+    }
+
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
         set(value) = prefs.edit().apply {

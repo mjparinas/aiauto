@@ -15,6 +15,7 @@ class AiAutoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = Graph(this)
+        graph.settings.fixCostUnits(graph.tasks)
         graph.notifier.createChannels()
         graph.engine.resumeAll()
         graph.watchNetwork(this)
