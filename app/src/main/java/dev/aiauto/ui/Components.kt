@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +68,16 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: B
 }
 
 /** A prompt box with a send button and a mic button that uses the phone's speech recognizer. */
+/**
+ * Insets for a Scaffold bottomBar that holds a text input. The app draws edge to edge, and Scaffold does not
+ * pad its bottomBar slot, so the bar must keep itself above the navigation bar and, while typing, the keyboard.
+ * The union makes sure the two are not added together.
+ */
+@Composable
+fun Modifier.bottomBarInsets(): Modifier =
+    this.background(MaterialTheme.colorScheme.background)
+        .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+
 @Composable
 fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
