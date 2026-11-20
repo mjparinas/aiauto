@@ -46,6 +46,20 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         if (settings.readAloudInCar && speaker.inCar) speaker.speak(message.text)
     }
 
+    private var lastProgress: String? = null
+    private var lastProgressMillis = 0L
+
+    /** Reads short progress notes like "Building or testing" aloud, without repeating them too often. */
+    @Synchronized
+    fun onProgress(text: String) {
+        if (!settings.readAloudInCar || !speaker.inCar) return
+        val now = System.currentTimeMillis()
+        if (text == lastProgress || now - lastProgressMillis < PROGRESS_GAP_MILLIS) return
+        lastProgress = text
+        lastProgressMillis = now
+        speaker.speak(text)
+    }
+
     /** Shows (or refreshes) the task's conversation so it pops up on the car screen. */
     fun post(task: Task) {
         val style = NotificationCompat.MessagingStyle(me)
@@ -130,5 +144,6 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         const val WORKING_ID = 1
         const val NEW_PREFIX = "new:"
         private const val MAX_MESSAGES = 8
+        private const val PROGRESS_GAP_MILLIS = 15_000L
     }
 }

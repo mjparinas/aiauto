@@ -38,6 +38,8 @@ class TaskEngine(
     private val githubFactory: (String) -> GitHub = { GitHub(it) },
     /** Called for each new line, so the app can notify and read it aloud. */
     private val onMessage: (Task, TaskMessage) -> Unit = { _, _ -> },
+    /** Called for each new progress note, so the app can read it aloud without posting a notification. */
+    private val onProgress: (Task, String) -> Unit = { _, _ -> },
 ) {
     private val running = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
@@ -190,6 +192,7 @@ class TaskEngine(
             update(taskId) { it.copy(messages = it.messages.dropLast(1)) }
         }
         append(taskId, Speaker.Status, text, notify = false, idPrefix = PROGRESS)
+        store.get(taskId)?.let { onProgress(it, text) }
     }
 
     private fun append(taskId: String, speaker: Speaker, text: String, notify: Boolean = true, idPrefix: String = "m-") {
