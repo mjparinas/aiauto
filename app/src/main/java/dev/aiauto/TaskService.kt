@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +22,7 @@ import kotlinx.coroutines.launch
  */
 class TaskService : Service() {
     private var watcher: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -33,6 +36,9 @@ class TaskService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Keep the CPU awake while Claude works, so the stream isn't paused when the screen turns off
+        // after Android Auto disconnects. The timeout is a safety net; the watcher renews it.
+        holdWakeLock()
         if (watcher?.isActive != true) {
             watcher = CoroutineScope(Dispatchers.Default).launch {
                 delay(5_000)
@@ -46,6 +52,7 @@ class TaskService : Service() {
                     }
                     delay(5_000)
                     sinceRefresh += 5_000
+                    holdWakeLock()
                 }
                 stopSelf()
             }
@@ -54,16 +61,31 @@ class TaskService : Service() {
         return START_STICKY
     }
 
+    private fun holdWakeLock() {
+        val lock = wakeLock ?: getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AiAuto:tasks")
+            .apply { setReferenceCounted(false) }
+            .also { wakeLock = it }
+        runCatching { lock.acquire(WAKE_LOCK_MILLIS) }
+    }
+
     override fun onDestroy() {
         watcher?.cancel()
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         super.onDestroy()
     }
 
     companion object {
         private const val PR_REFRESH_MILLIS = 30_000L
+        private const val WAKE_LOCK_MILLIS = 10 * 60 * 1000L
 
         fun ensureRunning(context: Context) {
             runCatching { ContextCompat.startForegroundService(context, Intent(context, TaskService::class.java)) }
+                .onFailure { Log.w("AiAuto", "Couldn't start the task service", it) }
         }
+
+        /** True when Android lets the app keep working in the background without battery limits. */
+        fun isUnrestricted(context: Context): Boolean =
+            context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
     }
 }

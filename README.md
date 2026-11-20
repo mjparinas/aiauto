@@ -73,6 +73,9 @@ aloud, ducking your music while it talks. You can turn this off in Settings.
 
    Then disconnect and reconnect the phone. Without this step the app's icon doesn't appear in the car at all.
    Messaging notifications work without it.
+6. **Background work.** The first time you open the app it asks to ignore battery optimization. Say yes: otherwise
+   Android (Samsung phones especially) may stop Claude's tasks soon after you unplug from the car. You can change it
+   later under Settings > Apps > AIAuto > Battery > Unrestricted.
 
 ## Building locally
 

@@ -107,6 +107,9 @@ class Graph(context: Context) {
             val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
             if (now && !connected && isConfigured) notifier.startChat()
             if (!now && connected) notifier.clearChat()
+            // Make sure the foreground service holds running tasks before and after the car goes away,
+            // so work started from the car keeps going on the phone until it's done.
+            if (now != connected && tasks.all().any { engine.isRunning(it.id) }) TaskService.ensureRunning(context)
             connected = now
         }
     }
