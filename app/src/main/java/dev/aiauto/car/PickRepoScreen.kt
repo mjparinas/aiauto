@@ -8,7 +8,9 @@ import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.car.app.ScreenManager
 import dev.aiauto.TaskService
+import dev.aiauto.core.RepoRef
 import dev.aiauto.graph
 
 /** Picks the repo for a new task, then listens for the spoken request on the car screen. */
@@ -23,22 +25,8 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
                     .setTitle(repo.name)
                     .addText(repo.owner)
                     .setOnClickListener {
-                        screenManager.push(
-                            ListenScreen(
-                                carContext,
-                                title = "New task in ${repo.name}",
-                                fallback = {
-                                    g.notifier.askForNewTask(repo)
-                                    CarToast.makeText(carContext, "Reply to the AIAuto message with your request", CarToast.LENGTH_LONG).show()
-                                    screenManager.pop()
-                                },
-                            ) { text ->
-                                val task = g.engine.start(repo, text)
-                                TaskService.ensureRunning(carContext)
-                                screenManager.pop()
-                                screenManager.push(TaskDetailScreen(carContext, task.id))
-                            },
-                        )
+                        screenManager.pop()
+                        listenForTask(carContext, screenManager, repo)
                     }
                     .build(),
             )
@@ -48,5 +36,32 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
             .setHeaderAction(Action.BACK)
             .setSingleList(items.build())
             .build()
+    }
+
+    companion object {
+        /** Starts a new task by voice: straight to listening with one repo, otherwise asks which repo first. */
+        fun startNewTask(carContext: CarContext, screenManager: ScreenManager) {
+            val repos = carContext.graph.repos.repos.value
+            if (repos.size == 1) listenForTask(carContext, screenManager, repos.first())
+            else screenManager.push(PickRepoScreen(carContext))
+        }
+
+        private fun listenForTask(carContext: CarContext, screenManager: ScreenManager, repo: RepoRef) {
+            val g = carContext.graph
+            screenManager.push(
+                ListenScreen(
+                    carContext,
+                    title = "New task in ${repo.name}",
+                    fallback = {
+                        g.notifier.askForNewTask(repo)
+                        CarToast.makeText(carContext, "Reply to the AIAuto message with your request", CarToast.LENGTH_LONG).show()
+                    },
+                ) { text ->
+                    val task = g.engine.start(repo, text)
+                    TaskService.ensureRunning(carContext)
+                    screenManager.push(TaskDetailScreen(carContext, task.id))
+                },
+            )
+        }
     }
 }

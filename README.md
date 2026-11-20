@@ -21,8 +21,8 @@ as messages that the car reads aloud.
   - The car UI uses the Android for Cars App Library: a task list, task details and a repo picker.
   - Each task is posted as a messaging notification. Android Auto reads these aloud and accepts voice replies.
 
-Voice input works right on the car screen. Tap **New task** and pick a repo, or open a task and tap **Reply**,
-then speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
+Voice input works right on the car screen. Tap **Talk to Claude** at the top of the task list (or **New task**),
+pick a repo if you have more than one, and speak. To answer Claude, open a task and tap **Reply**, then speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
 doesn't work, you can fall back to replying to the AIAuto message through Android Auto's messaging flow.
 
 **Projects** shows each repo straight from GitHub: whether its main branch is passing, the last change, and its

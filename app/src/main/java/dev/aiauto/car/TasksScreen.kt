@@ -5,6 +5,7 @@ import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
+import androidx.car.app.model.CarIcon
 import androidx.car.app.model.CarText
 import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
@@ -13,6 +14,8 @@ import androidx.car.app.model.Template
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.core.graphics.drawable.IconCompat
+import dev.aiauto.R
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
 import dev.aiauto.core.TaskStatus
@@ -37,10 +40,20 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
         val items = ItemList.Builder()
         val all = g.tasks.tasks.value
         val finished = all.count { it.isFinished && !g.engine.isRunning(it.id) }
-        // Car lists hold about six rows; keep one for "Clear finished" when there's something to clear.
-        val tasks = all.take(if (finished > 0) MAX_ROWS - 1 else MAX_ROWS)
-        if (tasks.isEmpty()) {
-            items.setNoItemsMessage(if (g.isConfigured) "No tasks yet. Tap New task to start one." else "Finish setup on your phone first.")
+        val canTalk = g.isConfigured && g.repos.repos.value.isNotEmpty()
+        // Car lists hold about six rows; keep one for "Talk to Claude" and one for "Clear finished" when shown.
+        val tasks = all.take(MAX_ROWS - (if (canTalk) 1 else 0) - (if (finished > 0) 1 else 0))
+        if (canTalk) {
+            items.addItem(
+                Row.Builder()
+                    .setTitle("Talk to Claude")
+                    .addText("Tap and say what you want changed")
+                    .setImage(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_mic)).build())
+                    .setOnClickListener { PickRepoScreen.startNewTask(carContext, screenManager) }
+                    .build(),
+            )
+        } else if (tasks.isEmpty()) {
+            items.setNoItemsMessage(if (g.isConfigured) "Add a repo on your phone first." else "Finish setup on your phone first.")
         }
         tasks.forEach { task ->
             items.addItem(
@@ -66,7 +79,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
         }
         val newTask = Action.Builder()
             .setTitle("New task")
-            .setOnClickListener { screenManager.push(PickRepoScreen(carContext)) }
+            .setOnClickListener { PickRepoScreen.startNewTask(carContext, screenManager) }
             .build()
         val projects = Action.Builder()
             .setTitle("Projects")
