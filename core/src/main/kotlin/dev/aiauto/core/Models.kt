@@ -26,7 +26,25 @@ data class RepoRef(
 }
 
 @Serializable
-enum class TaskStatus { Starting, Working, NeedsInput, Done, Failed }
+enum class TaskStatus { Starting, Working, NeedsInput, Done, Failed, Stopped }
+
+/** Where a pull request stands on GitHub. */
+@Serializable
+enum class PrState { Open, Merged, Closed }
+
+/**
+ * The combined result of a commit's checks (GitHub Actions and other status checks).
+ * [Unknown] means the token can't read them, which is never treated as passing.
+ */
+@Serializable
+enum class Checks { None, Pending, Passing, Failing, Unknown }
+
+@Serializable
+data class ChecksSummary(
+    val state: Checks,
+    val failing: List<String> = emptyList(),
+    val total: Int = 0,
+)
 
 @Serializable
 enum class Speaker { You, Claude, Status }
@@ -58,7 +76,24 @@ data class Task(
     val pendingPrompt: String? = null,
     /** Stopped because the connection dropped, not because of Claude. Resumes when the network is back. */
     val interrupted: Boolean = false,
+    /** Live pull request state, refreshed from GitHub. Null until a pull request exists. */
+    val prState: PrState? = null,
+    val checks: ChecksSummary? = null,
+    /** GitHub's own auto-merge is on for the pull request, so GitHub merges it once required checks pass. */
+    val githubAutoMerge: Boolean = false,
+    val prOpenedMillis: Long? = null,
+    /** What this task's Claude session has cost so far, in US dollars at list price. */
+    val costUsd: Double = 0.0,
 ) {
+    /** A pull request exists and hasn't been merged or closed yet. */
+    val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open
+
+    /** Nothing left to do or watch: safe to clear from the list. */
+    val isFinished: Boolean
+        get() = status == TaskStatus.Stopped ||
+            (status == TaskStatus.Failed && !interrupted) ||
+            (status == TaskStatus.Done && !hasOpenPr)
+
     val lastMessage: TaskMessage? get() = messages.lastOrNull()
 }
 

@@ -47,6 +47,7 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: B
         TaskStatus.NeedsInput -> "Needs you" to Color(0xFFB7791F)
         TaskStatus.Done -> "Done" to Color(0xFF4F7A55)
         TaskStatus.Failed -> "Stopped" to MaterialTheme.colorScheme.error
+        TaskStatus.Stopped -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(
         modifier
@@ -106,4 +107,41 @@ fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> 
             ) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send") }
         }
     }
+}
+
+/** A small colored label for a pull request's checks. */
+@Composable
+fun ChecksLabel(summary: dev.aiauto.core.ChecksSummary?, modifier: Modifier = Modifier) {
+    val color = when (summary?.state) {
+        dev.aiauto.core.Checks.Passing -> Color(0xFF4F7A55)
+        dev.aiauto.core.Checks.Failing -> MaterialTheme.colorScheme.error
+        dev.aiauto.core.Checks.Pending -> Color(0xFFB7791F)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        dev.aiauto.core.SpokenStatus.checks(summary).replaceFirstChar { it.uppercase() },
+        style = MaterialTheme.typography.labelMedium,
+        color = color,
+        modifier = modifier,
+    )
+}
+
+/** Asks before merging, with a warning when checks aren't green. */
+@Composable
+fun ConfirmMergeDialog(number: Int, checks: dev.aiauto.core.ChecksSummary?, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Merge pull request #$number?") },
+        text = {
+            Text(
+                when (checks?.state) {
+                    dev.aiauto.core.Checks.Failing -> "Checks are failing. Merge anyway?"
+                    dev.aiauto.core.Checks.Pending -> "Checks are still running. If GitHub requires them, it will merge once they pass."
+                    else -> "This merges it into the base branch on GitHub."
+                },
+            )
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { onDismiss(); onConfirm() }) { Text("Merge") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

@@ -22,6 +22,7 @@ class TaskEngineTest {
         override fun get(id: String) = map[id]
         override fun all() = map.values.toList()
         override fun put(task: Task) { map[task.id] = task }
+        override fun remove(id: String) { map.remove(id) }
     }
 
     private class Config(var setup: AgentSetup? = AgentSetup("agent", 1, "env")) : EngineConfig {

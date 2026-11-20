@@ -12,6 +12,8 @@ class AiAutoApp : Application() {
         graph.notifier.createChannels()
         graph.engine.resumeAll()
         graph.watchNetwork(this)
+        graph.engine.refreshPullRequests()
+        if (graph.engine.isWatchingPullRequests()) TaskService.ensureRunning(this)
     }
 }
 
