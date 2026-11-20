@@ -25,7 +25,24 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - name: Load signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::RELEASE_KEYSTORE_BASE64 is not set, so this APK is signed with a throwaway debug key and won't install over earlier releases."
+          fi
       - name: Test and build APK
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          VERSION_NAME: ${{ inputs.version || github.ref_name }}
+          # Release numbers only go up, so each APK counts as an update to the last one.
+          VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew :core:test :app:assembleRelease --stacktrace
       - name: Publish release
         env:
