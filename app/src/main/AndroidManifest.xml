@@ -69,6 +69,10 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
+                <!-- Android Auto treats an app that also posts messaging notifications as a messaging app.
+                     Without the MESSAGING category it opens only its built-in messages view and never this
+                     screen. With it, the app icon opens the templated screen (templated messaging). -->
+                <category android:name="androidx.car.app.category.MESSAGING" />
                 <category android:name="androidx.car.app.category.IOT" />
             </intent-filter>
         </service>
