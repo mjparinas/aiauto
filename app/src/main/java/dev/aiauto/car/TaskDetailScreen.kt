@@ -12,6 +12,7 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.lifecycle.lifecycleScope
 import dev.aiauto.core.Speaker
+import dev.aiauto.TaskService
 import dev.aiauto.graph
 import kotlinx.coroutines.launch
 
@@ -40,8 +41,19 @@ class TaskDetailScreen(carContext: CarContext, private val taskId: String) : Scr
                 .setTitle("Reply")
                 .setBackgroundColor(CarColor.PRIMARY)
                 .setOnClickListener {
-                    g.notifier.post(task)
-                    CarToast.makeText(carContext, "Open the AIAuto message and reply by voice", CarToast.LENGTH_LONG).show()
+                    screenManager.push(
+                        ListenScreen(
+                            carContext,
+                            title = "Reply to Claude",
+                            fallback = {
+                                g.notifier.post(task)
+                                CarToast.makeText(carContext, "Open the AIAuto message and reply by voice", CarToast.LENGTH_LONG).show()
+                            },
+                        ) { text ->
+                            g.engine.prompt(taskId, text)
+                            TaskService.ensureRunning(carContext)
+                        },
+                    )
                 }
                 .build(),
         )

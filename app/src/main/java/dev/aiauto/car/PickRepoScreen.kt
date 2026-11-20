@@ -8,9 +8,10 @@ import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import dev.aiauto.TaskService
 import dev.aiauto.graph
 
-/** Picks the repo for a new task, then asks for the request as a message the driver answers by voice. */
+/** Picks the repo for a new task, then listens for the spoken request on the car screen. */
 class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
     private val g = carContext.graph
 
@@ -22,9 +23,22 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
                     .setTitle(repo.name)
                     .addText(repo.owner)
                     .setOnClickListener {
-                        g.notifier.askForNewTask(repo)
-                        CarToast.makeText(carContext, "Reply to the AIAuto message with your request", CarToast.LENGTH_LONG).show()
-                        screenManager.pop()
+                        screenManager.push(
+                            ListenScreen(
+                                carContext,
+                                title = "New task in ${repo.name}",
+                                fallback = {
+                                    g.notifier.askForNewTask(repo)
+                                    CarToast.makeText(carContext, "Reply to the AIAuto message with your request", CarToast.LENGTH_LONG).show()
+                                    screenManager.pop()
+                                },
+                            ) { text ->
+                                val task = g.engine.start(repo, text)
+                                TaskService.ensureRunning(carContext)
+                                screenManager.pop()
+                                screenManager.push(TaskDetailScreen(carContext, task.id))
+                            },
+                        )
                     }
                     .build(),
             )

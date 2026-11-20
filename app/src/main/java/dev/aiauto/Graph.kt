@@ -36,6 +36,7 @@ class Graph(context: Context) {
             notifier.onMessage(task, message)
             TaskService.ensureRunning(context)
         },
+        onProgress = { _, text -> notifier.onProgress(text) },
     )
 
     val isConfigured: Boolean get() = secrets.anthropicKey != null && secrets.githubToken != null
