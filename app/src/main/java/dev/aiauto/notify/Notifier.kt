@@ -126,7 +126,8 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             .addInvisibleAction(markRead)
             .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) }))
             .build()
-        manager.notify(id, notification)
+        // Notifications can be blocked or throttled; that must never take a running task down with it.
+        runCatching { manager.notify(id, notification) }
     }
 
     private fun openApp(taskId: String?): PendingIntent = PendingIntent.getActivity(

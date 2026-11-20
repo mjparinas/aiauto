@@ -4,6 +4,7 @@ import androidx.car.app.CarContext
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
+import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarColor
 import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Pane
@@ -12,6 +13,7 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.lifecycle.lifecycleScope
 import dev.aiauto.core.Speaker
+import dev.aiauto.core.TaskStatus
 import dev.aiauto.TaskService
 import dev.aiauto.graph
 import kotlinx.coroutines.launch
@@ -36,10 +38,24 @@ class TaskDetailScreen(carContext: CarContext, private val taskId: String) : Scr
             pane.addRow(Row.Builder().setTitle("Waiting for Claude").addText(TasksScreen.statusLabel(task)).build())
         }
 
+        val stopped = task.status == TaskStatus.Failed
+        if (stopped) {
+            pane.addAction(
+                Action.Builder()
+                    .setTitle("Try again")
+                    .setBackgroundColor(CarColor.PRIMARY)
+                    .setOnClickListener {
+                        g.engine.retry(taskId)
+                        TaskService.ensureRunning(carContext)
+                        CarToast.makeText(carContext, "Trying again", CarToast.LENGTH_SHORT).show()
+                    }
+                    .build(),
+            )
+        }
         pane.addAction(
             Action.Builder()
                 .setTitle("Reply")
-                .setBackgroundColor(CarColor.PRIMARY)
+                .apply { if (!stopped) setBackgroundColor(CarColor.PRIMARY) }
                 .setOnClickListener {
                     screenManager.push(
                         ListenScreen(
@@ -57,19 +73,21 @@ class TaskDetailScreen(carContext: CarContext, private val taskId: String) : Scr
                 }
                 .build(),
         )
-        pane.addAction(
-            Action.Builder()
-                .setTitle("Read aloud")
-                .setOnClickListener {
-                    val latest = task.messages.lastOrNull { it.speaker == Speaker.Claude } ?: task.lastMessage
-                    g.speaker.speak("${task.title}. ${TasksScreen.statusLabel(task)}. ${latest?.text.orEmpty()}")
-                }
-                .build(),
-        )
+        val readAloud = Action.Builder()
+            .setTitle("Read aloud")
+            .setOnClickListener {
+                // When stopped, the latest status line is the reason, which is what the driver needs to hear.
+                val latest = if (stopped) task.lastMessage else task.messages.lastOrNull { it.speaker == Speaker.Claude } ?: task.lastMessage
+                g.speaker.speak("${task.title}. ${TasksScreen.statusLabel(task)}. ${latest?.text.orEmpty()}")
+            }
+            .build()
+        // A pane holds two actions; when stopped, Try again takes one of them and Read aloud moves to the header.
+        if (!stopped) pane.addAction(readAloud)
 
         return PaneTemplate.Builder(pane.build())
             .setTitle(task.title)
             .setHeaderAction(Action.BACK)
+            .apply { if (stopped) setActionStrip(ActionStrip.Builder().addAction(readAloud).build()) }
             .build()
     }
 }

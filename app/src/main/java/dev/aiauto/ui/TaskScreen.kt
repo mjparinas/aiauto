@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -26,6 +27,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -44,7 +46,7 @@ import dev.aiauto.core.TaskStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskScreen(task: Task, onBack: () -> Unit, onSend: (String) -> Unit) {
+fun TaskScreen(task: Task, onBack: () -> Unit, onRetry: () -> Unit, onSend: (String) -> Unit) {
     val context = LocalContext.current
     val list = rememberLazyListState()
     LaunchedEffect(task.messages.size) { if (task.messages.isNotEmpty()) list.animateScrollToItem(task.messages.size - 1) }
@@ -60,7 +62,7 @@ fun TaskScreen(task: Task, onBack: () -> Unit, onSend: (String) -> Unit) {
                         Text(task.repo.fullName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
-                actions = { StatusPill(task.status, Modifier.padding(end = 12.dp)) },
+                actions = { StatusPill(task.status, Modifier.padding(end = 12.dp), interrupted = task.interrupted) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -69,6 +71,7 @@ fun TaskScreen(task: Task, onBack: () -> Unit, onSend: (String) -> Unit) {
                 if (task.status == TaskStatus.Working || task.status == TaskStatus.Starting) {
                     LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
                 }
+                if (task.status == TaskStatus.Failed) StoppedBanner(task, onRetry)
                 PromptBar(placeholder = "Ask for a change…", onSend = onSend)
             }
         },
@@ -90,6 +93,31 @@ fun TaskScreen(task: Task, onBack: () -> Unit, onSend: (String) -> Unit) {
             }
             items(task.messages, key = { it.id }) { Message(it) }
         }
+    }
+}
+
+/** Says why the task stopped and offers to pick it back up. */
+@Composable
+private fun StoppedBanner(task: Task, onRetry: () -> Unit) {
+    val reason = task.messages.lastOrNull { it.speaker == Speaker.Status }?.text
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (task.interrupted) "Connection lost. Claude may still be working." else reason ?: "This task stopped.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onRetry) { Text("Try again") }
     }
 }
 

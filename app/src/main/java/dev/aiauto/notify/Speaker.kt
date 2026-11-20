@@ -72,7 +72,9 @@ class Speaker(context: Context) {
 
     private fun say(text: String) {
         if (queued.getAndIncrement() == 0) audio.requestAudioFocus(focus)
-        tts.speak(text, TextToSpeech.QUEUE_ADD, null, "u" + utteranceIds.incrementAndGet())
+        val result = runCatching { tts.speak(text, TextToSpeech.QUEUE_ADD, null, "u" + utteranceIds.incrementAndGet()) }
+        // If the engine refused it, no onDone will come, so give the music its volume back now.
+        if (result.getOrDefault(TextToSpeech.ERROR) == TextToSpeech.ERROR) finished()
     }
 
     private fun finished() {

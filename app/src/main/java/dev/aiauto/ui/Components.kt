@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import dev.aiauto.core.TaskStatus
 
 @Composable
-fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier) {
-    val (label, color) = when (status) {
+fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: Boolean = false) {
+    val (label, color) = if (status == TaskStatus.Failed && interrupted) "Offline" to Color(0xFFB7791F) else when (status) {
         TaskStatus.Starting -> "Starting" to MaterialTheme.colorScheme.onSurfaceVariant
         TaskStatus.Working -> "Working" to Clay
         TaskStatus.NeedsInput -> "Needs you" to Color(0xFFB7791F)

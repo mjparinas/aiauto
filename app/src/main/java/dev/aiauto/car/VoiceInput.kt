@@ -46,10 +46,12 @@ class VoiceInput(private val carContext: CarContext) {
         if (ContextCompat.checkSelfPermission(carContext, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             start(onText, onError)
         } else {
-            carContext.requestPermissions(listOf(Manifest.permission.RECORD_AUDIO)) { granted, _ ->
-                if (Manifest.permission.RECORD_AUDIO in granted) start(onText, onError)
-                else onError("Allow microphone access to talk to Claude.")
-            }
+            runCatching {
+                carContext.requestPermissions(listOf(Manifest.permission.RECORD_AUDIO)) { granted, _ ->
+                    if (Manifest.permission.RECORD_AUDIO in granted) start(onText, onError)
+                    else onError("Allow microphone access to talk to Claude.")
+                }
+            }.onFailure { onError("Open AIAuto on your phone once to allow the microphone.") }
         }
     }
 
@@ -72,10 +74,21 @@ class VoiceInput(private val carContext: CarContext) {
         audio.requestAudioFocus(focus)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        if (useCarMic && Build.VERSION.SDK_INT >= 33) addCarMicrophone(intent)
+        if (useCarMic && Build.VERSION.SDK_INT >= 33) {
+            // The car's microphone isn't always available (host quirks, another app recording). Use the phone's.
+            if (runCatching { addCarMicrophone(intent) }.isFailure) {
+                cancel()
+                recognize(false, onText, onError)
+                return
+            }
+        }
 
         var heardSpeech = false
-        val r = SpeechRecognizer.createSpeechRecognizer(carContext)
+        val r = runCatching { SpeechRecognizer.createSpeechRecognizer(carContext) }.getOrElse {
+            cancel()
+            onError("Voice input isn't working right now. Reply by message instead.")
+            return
+        }
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
             override fun onBeginningOfSpeech() { heardSpeech = true }
@@ -104,7 +117,10 @@ class VoiceInput(private val carContext: CarContext) {
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        r.startListening(intent)
+        runCatching { r.startListening(intent) }.onFailure {
+            cancel()
+            if (useCarMic) recognize(false, onText, onError) else onError("Voice input isn't working right now. Reply by message instead.")
+        }
     }
 
     /** Streams the car microphone into the recognizer through a pipe. */
