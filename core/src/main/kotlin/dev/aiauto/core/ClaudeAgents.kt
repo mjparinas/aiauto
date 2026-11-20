@@ -127,11 +127,17 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
     /**
      * Streams the session until Claude finishes its turn, fails, or [shouldStop] returns true.
      * Opens the stream first, then lists past events so nothing is reported twice after a reconnect.
+     * On a reconnect, events that arrived while the phone was offline are handled from that list.
      */
     fun follow(sessionId: String, seenEventIds: MutableSet<String>, shouldStop: () -> Boolean = { false }, onUpdate: (AgentUpdate) -> Unit) {
         client.beta().sessions().events().streamStreaming(sessionId).use { stream ->
+            val catchUp = seenEventIds.isNotEmpty()
             for (past in client.beta().sessions().events().list(sessionId).autoPager()) {
-                eventId(past._json())?.let { seenEventIds.add(it) }
+                val id = eventId(past._json()) ?: continue
+                if (seenEventIds.add(id) && catchUp) {
+                    val event = runCatching { past._json().get().convert(BetaManagedAgentsStreamSessionEvents::class.java) }.getOrNull()
+                    if (event != null && handle(sessionId, event, onUpdate)) return
+                }
             }
             for (event in stream.stream()) {
                 if (shouldStop()) return

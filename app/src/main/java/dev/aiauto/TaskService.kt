@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Keeps the app alive while Claude is working, so status keeps arriving with the phone
- * locked in a mount. Stops itself once no task is running.
+ * locked in a mount or after Android Auto disconnects. Stops itself once no task is running.
  */
 class TaskService : Service() {
     private var watcher: Job? = null
@@ -34,7 +34,8 @@ class TaskService : Service() {
                 stopSelf()
             }
         }
-        return START_NOT_STICKY
+        // If Android kills the app mid-task, restart it; the app re-attaches to running tasks on startup.
+        return START_STICKY
     }
 
     override fun onDestroy() {

@@ -121,17 +121,24 @@ class TaskEngine(
         var attempts = 0
         var finished = false
         while (!finished && scope.isActive) {
+            var dropped: Exception? = null
             try {
                 runInterruptible {
                     claude.follow(sessionId, seen) { update ->
+                        attempts = 0
                         if (handle(taskId, update)) finished = true
                     }
                 }
-                finished = true
-            } catch (e: java.io.IOException) {
-                // Phones drop connections in tunnels and parking garages. Reconnect with backoff.
-                if (++attempts > 6) throw e
-                delay(2_000L * attempts)
+            } catch (e: Exception) {
+                // Phones drop connections in tunnels, parking garages and when leaving the car.
+                if (e !is java.io.IOException && e !is com.anthropic.errors.AnthropicIoException) throw e
+                dropped = e
+            }
+            // The session keeps running on Anthropic's side, so reconnect with backoff until the turn ends,
+            // including when the stream simply closes before Claude is done.
+            if (!finished) {
+                if (++attempts > MAX_RECONNECTS) throw dropped ?: java.io.IOException("Lost the connection to Claude.")
+                delay(minOf(2_000L * attempts, 30_000L))
             }
         }
         if (store.get(taskId)?.status == TaskStatus.Working) afterTurn(taskId)
@@ -206,6 +213,8 @@ class TaskEngine(
 
     companion object {
         private const val PROGRESS = "p-"
+        /** Consecutive failed reconnects before giving up, roughly 20 minutes without a connection. */
+        private const val MAX_RECONNECTS = 45
 
         fun titleFrom(request: String): String {
             val words = request.trim().split(Regex("\\s+"))
