@@ -56,11 +56,8 @@ Requires JDK 17 and the Android SDK (API 35).
 
 ## Making a release
 
-Push a version tag, and the **Release** workflow builds the APK and publishes it:
-
-```
-git tag v0.2.0 && git push origin v0.2.0
-```
+In the Actions tab, open **Release**, click **Run workflow** and enter a version like `v0.2.0`. You can also push
+a tag like that. Either way, the workflow builds the APK and publishes a release with the APK attached.
 
 Releases are signed with the CI runner's temporary debug key. Android might refuse to install a new version over
 an old one; if it does, uninstall the old one first. A fixed signing key stored as a repo secret would solve this.
