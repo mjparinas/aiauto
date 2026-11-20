@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AiAutoTheme {
+                dev.aiauto.update.UpdateDialog((application as AiAutoApp).updater)
                 val tasks by g.tasks.tasks.collectAsStateWithLifecycle()
                 val repos by g.repos.repos.collectAsStateWithLifecycle()
                 val views by g.projects.repos.collectAsStateWithLifecycle()
