@@ -26,8 +26,9 @@ Tap **Talk** on the car screen and say anything. Claude (Opus 5.5, low effort fo
 through the car speakers, and can start a coding task in one of your saved repos or answer a running task when you
 ask it to. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
 
-Voice input also works inside tasks: open **Tasks**, then tap **New task** and pick a repo, or open a task and tap **Reply**,
-then speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
+Voice input also works inside tasks: open **Tasks**, then tap **Talk to Claude** at the top of the list (or **New task**),
+pick a repo if you have more than one, and speak your request. To answer Claude, open a task and tap **Reply**, then
+speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
 doesn't work, you can fall back to replying to the AIAuto message through Android Auto's messaging flow.
 
 **Projects** shows each repo straight from GitHub: whether its main branch is passing, the last change, and its
