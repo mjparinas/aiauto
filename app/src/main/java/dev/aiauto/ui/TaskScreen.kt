@@ -2,6 +2,7 @@ package dev.aiauto.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,7 +36,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +69,7 @@ fun TaskScreen(
     onSend: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var confirmMerge by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     if (confirmMerge) task.prNumber?.let { ConfirmMergeDialog(it, task.checks, onConfirm = onMerge, onDismiss = { confirmMerge = false }) }
@@ -92,6 +97,10 @@ fun TaskScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        clipboard.setText(AnnotatedString(chatText(task)))
+                        Toast.makeText(context, "Chat copied", Toast.LENGTH_SHORT).show()
+                    }) { Icon(Icons.Rounded.ContentCopy, "Copy chat") }
                     StatusPill(task.status, Modifier.padding(end = 4.dp), interrupted = task.interrupted)
                     if (running) {
                         IconButton(onClick = onStop) { Icon(Icons.Rounded.StopCircle, "Stop") }
@@ -148,6 +157,13 @@ fun TaskScreen(
             items(task.messages, key = { it.id }) { Message(it) }
         }
     }
+}
+
+/** The whole conversation as plain text, one message per paragraph. */
+private fun chatText(task: Task): String = buildString {
+    append("${task.title} (${task.repo.fullName})")
+    task.prUrl?.let { append("\n").append(it) }
+    task.messages.forEach { append("\n\n${it.speaker}: ${it.text}") }
 }
 
 /** Says why the task stopped and offers to pick it back up. */
