@@ -26,11 +26,27 @@ class TaskService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = graph.notifier.workingNotification()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        ServiceCompat.startForeground(this, dev.aiauto.notify.Notifier.WORKING_ID, notification, type)
+        // Android can refuse a foreground start (background limits, missing permission). Tasks still run
+        // while the app is open, and resume when it next starts, so stop quietly instead of crashing.
+        val started = runCatching { ServiceCompat.startForeground(this, dev.aiauto.notify.Notifier.WORKING_ID, notification, type) }
+        if (started.isFailure) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (watcher?.isActive != true) {
             watcher = CoroutineScope(Dispatchers.Default).launch {
                 delay(5_000)
-                while (graph.tasks.all().any { graph.engine.isRunning(it.id) }) delay(5_000)
+                var sinceRefresh = 0L
+                // Stay up while Claude works, and while a new pull request's checks are running so the
+                // driver hears the result and green pull requests get merged.
+                while (graph.tasks.all().any { graph.engine.isRunning(it.id) } || graph.engine.isWatchingPullRequests()) {
+                    if (sinceRefresh >= PR_REFRESH_MILLIS) {
+                        graph.engine.refreshPullRequests()
+                        sinceRefresh = 0
+                    }
+                    delay(5_000)
+                    sinceRefresh += 5_000
+                }
                 stopSelf()
             }
         }
@@ -44,6 +60,8 @@ class TaskService : Service() {
     }
 
     companion object {
+        private const val PR_REFRESH_MILLIS = 30_000L
+
         fun ensureRunning(context: Context) {
             runCatching { ContextCompat.startForegroundService(context, Intent(context, TaskService::class.java)) }
         }

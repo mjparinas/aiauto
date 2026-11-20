@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,13 +45,14 @@ import androidx.compose.ui.unit.dp
 import dev.aiauto.core.TaskStatus
 
 @Composable
-fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier) {
-    val (label, color) = when (status) {
+fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: Boolean = false) {
+    val (label, color) = if (status == TaskStatus.Failed && interrupted) "Offline" to Color(0xFFB7791F) else when (status) {
         TaskStatus.Starting -> "Starting" to MaterialTheme.colorScheme.onSurfaceVariant
         TaskStatus.Working -> "Working" to Clay
         TaskStatus.NeedsInput -> "Needs you" to Color(0xFFB7791F)
         TaskStatus.Done -> "Done" to Color(0xFF4F7A55)
         TaskStatus.Failed -> "Stopped" to MaterialTheme.colorScheme.error
+        TaskStatus.Stopped -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(
         modifier
@@ -60,6 +66,16 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = color)
     }
 }
+
+/**
+ * Insets for a Scaffold bottomBar that holds a text input. The app draws edge to edge, and Scaffold does not
+ * pad its bottomBar slot, so the bar must keep itself above the navigation bar and, while typing, the keyboard.
+ * The union makes sure the two are not added together.
+ */
+@Composable
+fun Modifier.bottomBarInsets(): Modifier =
+    this.background(MaterialTheme.colorScheme.background)
+        .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
 
 /**
  * A prompt box with a send button and a mic button that uses the phone's speech recognizer.
@@ -112,4 +128,41 @@ fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> 
             ) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send") }
         }
     }
+}
+
+/** A small colored label for a pull request's checks. */
+@Composable
+fun ChecksLabel(summary: dev.aiauto.core.ChecksSummary?, modifier: Modifier = Modifier) {
+    val color = when (summary?.state) {
+        dev.aiauto.core.Checks.Passing -> Color(0xFF4F7A55)
+        dev.aiauto.core.Checks.Failing -> MaterialTheme.colorScheme.error
+        dev.aiauto.core.Checks.Pending -> Color(0xFFB7791F)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        dev.aiauto.core.SpokenStatus.checks(summary).replaceFirstChar { it.uppercase() },
+        style = MaterialTheme.typography.labelMedium,
+        color = color,
+        modifier = modifier,
+    )
+}
+
+/** Asks before merging, with a warning when checks aren't green. */
+@Composable
+fun ConfirmMergeDialog(number: Int, checks: dev.aiauto.core.ChecksSummary?, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Merge pull request #$number?") },
+        text = {
+            Text(
+                when (checks?.state) {
+                    dev.aiauto.core.Checks.Failing -> "Checks are failing. Merge anyway?"
+                    dev.aiauto.core.Checks.Pending -> "Checks are still running. If GitHub requires them, it will merge once they pass."
+                    else -> "This merges it into the base branch on GitHub."
+                },
+            )
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { onDismiss(); onConfirm() }) { Text("Merge") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

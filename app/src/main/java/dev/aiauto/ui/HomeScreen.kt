@@ -32,6 +32,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.rounded.ClearAll
+import androidx.compose.material.icons.rounded.FolderOpen
+import dev.aiauto.core.Checks
+import dev.aiauto.core.PrState
+import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,13 +47,22 @@ fun HomeScreen(
     onOpen: (Task) -> Unit,
     onNew: () -> Unit,
     onSettings: () -> Unit,
+    onProjects: () -> Unit,
+    finishedCount: Int,
+    onClearFinished: () -> Unit,
+    spentToday: Double,
+    dailyLimit: Double?,
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Tasks", style = MaterialTheme.typography.headlineMedium) },
-                actions = { IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings") } },
+                actions = {
+                    if (finishedCount > 0) IconButton(onClick = onClearFinished) { Icon(Icons.Rounded.ClearAll, "Clear $finishedCount finished") }
+                    IconButton(onClick = onProjects) { Icon(Icons.Rounded.FolderOpen, "Projects") }
+                    IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings") }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -70,6 +84,13 @@ fun HomeScreen(
                 contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                item {
+                    Text(
+                        "Today: ${SpokenStatus.money(spentToday)}" + (dailyLimit?.let { " of ${SpokenStatus.money(it)} limit" } ?: ""),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 items(tasks, key = { it.id }) { task -> TaskCard(task) { onOpen(task) } }
             }
         }
@@ -93,7 +114,7 @@ private fun TaskCard(task: Task, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                StatusPill(task.status)
+                StatusPill(task.status, interrupted = task.interrupted)
             }
             Spacer(Modifier.height(6.dp))
             Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -115,8 +136,24 @@ private fun TaskCard(task: Task, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
+                if (task.costUsd > 0) {
+                    Text(
+                        SpokenStatus.money(task.costUsd),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 12.dp),
+                    )
+                }
                 task.prNumber?.let {
-                    Text("PR #$it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        when (task.prState) {
+                            PrState.Merged -> "PR #$it merged"
+                            PrState.Closed -> "PR #$it closed"
+                            else -> "PR #$it · " + SpokenStatus.checks(task.checks)
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (task.checks?.state == Checks.Failing && task.prState != PrState.Merged) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }
