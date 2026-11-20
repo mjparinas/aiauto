@@ -21,6 +21,7 @@ import dev.aiauto.core.RepoRef
 import dev.aiauto.ui.AiAutoTheme
 import dev.aiauto.ui.HomeScreen
 import dev.aiauto.ui.NewTaskScreen
+import dev.aiauto.ui.ProjectsScreen
 import dev.aiauto.ui.SettingsScreen
 import dev.aiauto.ui.SettingsState
 import dev.aiauto.ui.TaskScreen
@@ -32,6 +33,7 @@ private sealed interface Screen {
     data object Home : Screen
     data object NewTask : Screen
     data object Settings : Screen
+    data object Projects : Screen
     data class Detail(val taskId: String) : Screen
 }
 
@@ -52,6 +54,8 @@ class MainActivity : ComponentActivity() {
                 dev.aiauto.update.UpdateDialog((application as AiAutoApp).updater)
                 val tasks by g.tasks.tasks.collectAsStateWithLifecycle()
                 val repos by g.repos.repos.collectAsStateWithLifecycle()
+                val views by g.projects.repos.collectAsStateWithLifecycle()
+                var projectMessage by remember { mutableStateOf<String?>(null) }
                 val scope = rememberCoroutineScope()
                 var settings by remember { mutableStateOf(settingsState(repos)) }
 
@@ -64,6 +68,26 @@ class MainActivity : ComponentActivity() {
                         onOpen = { screen = Screen.Detail(it.id) },
                         onNew = { screen = Screen.NewTask },
                         onSettings = { screen = Screen.Settings },
+                        onProjects = {
+                            projectMessage = null
+                            g.projects.refreshAll(repos, maxAgeMillis = 30_000)
+                            screen = Screen.Projects
+                        },
+                        finishedCount = tasks.count { it.isFinished && !g.engine.isRunning(it.id) },
+                        onClearFinished = { tasks.filter { it.isFinished }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
+                        spentToday = g.settings.spentTodayUsd,
+                        dailyLimit = g.settings.dailyLimitUsd,
+                    )
+                    Screen.Projects -> ProjectsScreen(
+                        repos = repos,
+                        views = views,
+                        message = projectMessage,
+                        onBack = { screen = Screen.Home },
+                        onRefresh = { g.projects.refreshAll(repos) },
+                        onMerge = { repo, number ->
+                            projectMessage = "Merging #$number…"
+                            scope.launch { projectMessage = withContext(Dispatchers.IO) { g.mergePull(repo, number) } }
+                        },
                     )
                     Screen.NewTask -> NewTaskScreen(
                         repos = repos,
@@ -79,7 +103,15 @@ class MainActivity : ComponentActivity() {
                         if (task == null) screen = Screen.Home
                         else TaskScreen(
                             task,
+                            running = g.engine.isRunning(task.id) || task.status == dev.aiauto.core.TaskStatus.Working || task.status == dev.aiauto.core.TaskStatus.Starting,
                             onBack = { screen = Screen.Home },
+                            onStop = { g.engine.stop(task.id) },
+                            onClear = {
+                                g.engine.clear(task.id)
+                                g.notifier.clear(task.id)
+                                screen = Screen.Home
+                            },
+                            onMerge = { scope.launch(Dispatchers.IO) { g.engine.mergeNow(task.id) } },
                             onRetry = {
                                 g.engine.retry(task.id)
                                 TaskService.ensureRunning(this)
@@ -123,10 +155,24 @@ class MainActivity : ComponentActivity() {
                         },
                         onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
+                        onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },
+                        onDailyLimit = {
+                            g.settings.dailyLimitUsd = it
+                            settings = settings.copy(
+                                dailyLimitUsd = it,
+                                message = it?.let { v -> "Daily limit set to ${dev.aiauto.core.SpokenStatus.money(v)}." } ?: "No daily limit.",
+                            )
+                        },
                     )
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Pull request state and checks change on GitHub while the app is closed.
+        graph.engine.refreshPullRequests()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -139,6 +185,9 @@ class MainActivity : ComponentActivity() {
         hasGithubToken = graph.secrets.githubToken != null,
         repos = repos,
         readAloud = graph.settings.readAloudInCar,
+        autoMerge = graph.settings.autoMerge,
+        dailyLimitUsd = graph.settings.dailyLimitUsd,
+        spentTodayUsd = graph.settings.spentTodayUsd,
     )
 
     private fun Intent.taskTarget(): Screen? = getStringExtra(EXTRA_TASK)?.let { Screen.Detail(it) }

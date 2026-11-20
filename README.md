@@ -25,6 +25,18 @@ Voice input works right on the car screen. Tap **New task** and pick a repo, or 
 then speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
 doesn't work, you can fall back to replying to the AIAuto message through Android Auto's messaging flow.
 
+**Projects** shows each repo straight from GitHub: whether its main branch is passing, the last change, and its
+open pull requests with their checks. Tap a pull request to hear its checks or merge it (the app asks first).
+
+When a task's pull request opens, the app follows its checks and tells you when they pass or fail. With
+**Merge when checks pass** on (the default), it turns on GitHub's auto-merge if the repo allows it, so GitHub merges
+even with your phone off. Otherwise the app merges once every check is green, as long as it's still running. Failing
+checks, or checks your token can't read, are never merged.
+
+You can **Stop** a working task, **Clear** one, or clear every finished task at once. Each task shows what it has
+cost so far, and a **daily limit** (default $20, set in Settings) stops Claude when the day's total reaches it.
+The limit is also set as the session's budget on Anthropic's side, so it holds even if the phone loses signal.
+
 While you're in the car, the app reads Claude's messages and short progress notes like "Building or testing"
 aloud, ducking your music while it talks. You can turn this off in Settings.
 
@@ -37,7 +49,8 @@ aloud, ducking your music while it talks. You can turn this off in Settings.
 2. **Claude API key.** Create one at [platform.claude.com](https://platform.claude.com). Usage is billed to that
    account. The model is Claude Opus 5.5, and each task is a Managed Agents session.
 3. **GitHub token.** Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for
-   the repos you want to use. Set **Contents** and **Pull requests** to read and write.
+   the repos you want to use. Set **Contents** and **Pull requests** to read and write, and **Checks** and
+   **Commit statuses** to read. To let GitHub merge on its own, turn on **Allow auto-merge** in the repo's settings.
 4. **Settings in the app.** Paste both, then add repos as `owner/name`. The key and token are encrypted with the
    Android Keystore. The GitHub token is also sent to Anthropic for each session, so the sandbox can clone and
    push. Anthropic's proxy adds the token to git requests outside the sandbox, so code running in the sandbox
@@ -71,5 +84,9 @@ an old one; if it does, uninstall the old one first. A fixed signing key stored 
   the Claude API. They don't appear in the Claude app.
 - Google Play doesn't accept general AI or productivity apps for Android Auto. The full car UI is for personal
   installs and Play's internal testing track.
+- Costs are list prices as each session reports them, so they can differ a little from your invoice. The daily
+  total is counted on this phone and resets at local midnight.
+- The app's own merge-when-green only works while the app is alive, for up to three hours after a pull request
+  opens. GitHub's auto-merge has no such limit, but it only waits for checks the repo marks as required.
 - While you're driving, the agent declines any step that its safety check flags for review. You'll hear that it
   skipped something, and the task continues.

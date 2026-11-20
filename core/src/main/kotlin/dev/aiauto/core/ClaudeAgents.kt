@@ -21,6 +21,10 @@ import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEve
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams
 import com.anthropic.models.beta.sessions.events.EventSendParams
 import com.anthropic.core.Timeout
+import com.anthropic.models.beta.BetaCurrency
+import com.anthropic.models.beta.BetaMonetaryAmount
+import com.anthropic.models.beta.sessions.SessionUpdateParams
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEventParams
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionEvent
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionStatusIdleEvent
 import java.time.Duration
@@ -41,6 +45,12 @@ sealed interface AgentUpdate {
     data class Declined(val toolName: String) : AgentUpdate
 
     data class Failed(val reason: String) : AgentUpdate
+
+    /** The session's running total cost so far, in US dollars at list price. */
+    data class Cost(val totalUsd: Double) : AgentUpdate
+
+    /** The session stopped at the spending cap the app set for it. */
+    data object BudgetReached : AgentUpdate
 }
 
 /** What [TaskEngine] needs from Claude. [ClaudeAgents] is the real one; tests use a fake. */
@@ -55,6 +65,18 @@ interface AgentClient : AutoCloseable {
         shouldStop: () -> Boolean = { false },
         onUpdate: (AgentUpdate) -> Unit,
     ): Boolean
+
+    /** Asks Claude to stop what it's doing. The session stays and can take a new prompt. */
+    fun interrupt(sessionId: String) {}
+
+    /** Archives a session the user cleared, so it stops showing up as active. */
+    fun archive(sessionId: String) {}
+
+    /** Caps what the whole session may cost, so Claude stops on its side when the daily limit runs out. */
+    fun setBudget(sessionId: String, maxUsd: Double) {}
+
+    /** The session's total cost so far, or null when it isn't reported. */
+    fun costUsd(sessionId: String): Double? = null
 }
 
 /**
@@ -172,9 +194,11 @@ class ClaudeAgents(apiKey: String) : AgentClient {
             var lastUserMessage = -1
             var lastStop: Pair<Int, BetaManagedAgentsSessionEvent>? = null
             val confirmed = HashSet<String>()
+            var lastCost: Double? = null
             for ((index, past) in client.beta().sessions().events().list(sessionId).autoPager().withIndex()) {
                 eventId(past._json())?.let { seenEventIds.add(it) }
                 when {
+                    past.isSessionUsage() -> costOf(past.asSessionUsage().usage().listCost())?.let { lastCost = it }
                     past.isUserMessage() -> lastUserMessage = index
                     past.isUserToolConfirmation() -> confirmed.add(past.asUserToolConfirmation().toolUseId())
                     past.isSessionStatusIdle() || past.isSessionStatusTerminated() -> lastStop = index to past
@@ -182,6 +206,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
                 }
             }
             onConnected()
+            lastCost?.let { onUpdate(AgentUpdate.Cost(it)) }
             val stop = lastStop
             if (stop != null && stop.first > lastUserMessage && catchUp(sessionId, stop.second, confirmed, onUpdate)) return true
             for (event in stream.stream()) {
@@ -252,6 +277,9 @@ class ClaudeAgents(apiKey: String) : AgentClient {
                 onUpdate(AgentUpdate.Failed("The session ended."))
                 return true
             }
+            event.isSessionUsage() -> {
+                costOf(event.asSessionUsage().usage().listCost())?.let { onUpdate(AgentUpdate.Cost(it)) }
+            }
             event.isSessionError() -> {
                 // Session errors are usually retried by Claude itself; the idle event that follows says whether it gave up.
                 val message = SpokenStatus.clean(event.asSessionError().error().message()).take(100)
@@ -265,7 +293,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
         when {
             reason.isEndTurn() -> onUpdate(AgentUpdate.TurnDone)
             reason.isRefusal() -> onUpdate(AgentUpdate.Failed("Claude declined this request."))
-            reason.isBudgetReached() -> onUpdate(AgentUpdate.Failed("The session hit its spending limit."))
+            reason.isBudgetReached() -> onUpdate(AgentUpdate.BudgetReached)
             else -> onUpdate(AgentUpdate.Failed("Claude stopped after repeated errors on its side. Tap Try again to continue."))
         }
         return true
@@ -285,6 +313,40 @@ class ClaudeAgents(apiKey: String) : AgentClient {
                 .build(),
         )
     }
+
+    override fun interrupt(sessionId: String) {
+        client.beta().sessions().events().send(
+            sessionId,
+            EventSendParams.builder()
+                .addEvent(BetaManagedAgentsUserInterruptEventParams.builder().build())
+                .build(),
+        )
+    }
+
+    override fun archive(sessionId: String) {
+        client.beta().sessions().archive(sessionId)
+    }
+
+    override fun setBudget(sessionId: String, maxUsd: Double) {
+        client.beta().sessions().update(
+            sessionId,
+            SessionUpdateParams.builder()
+                .limitBudget(
+                    BetaMonetaryAmount.builder()
+                        .amount(String.format(java.util.Locale.US, "%.2f", maxUsd.coerceAtLeast(0.01)))
+                        .currency(BetaCurrency.USD)
+                        .build(),
+                )
+                .build(),
+        )
+    }
+
+    override fun costUsd(sessionId: String): Double? =
+        costOf(client.beta().sessions().retrieve(sessionId).usage().listCost())
+
+    private fun costOf(amount: Optional<BetaMonetaryAmount>): Double? =
+        // List cost is reported in US dollars.
+        amount.orElse(null)?.let { runCatching { it.amount().toDouble() }.getOrNull() }
 
     private fun eventId(json: Optional<com.anthropic.core.JsonValue>): String? =
         json.flatMap { it.asObject() }.flatMap { obj -> Optional.ofNullable(obj["id"]).flatMap { it.asString() } }.orElse(null)

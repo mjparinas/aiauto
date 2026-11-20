@@ -39,15 +39,45 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.aiauto.core.PrState
 import dev.aiauto.core.Speaker
+import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
 import dev.aiauto.core.TaskMessage
 import dev.aiauto.core.TaskStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskScreen(task: Task, onBack: () -> Unit, onRetry: () -> Unit, onSend: (String) -> Unit) {
+fun TaskScreen(
+    task: Task,
+    running: Boolean,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onStop: () -> Unit,
+    onClear: () -> Unit,
+    onMerge: () -> Unit,
+    onSend: (String) -> Unit,
+) {
     val context = LocalContext.current
+    var confirmMerge by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmMerge) task.prNumber?.let { ConfirmMergeDialog(it, task.checks, onConfirm = onMerge, onDismiss = { confirmMerge = false }) }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Clear this task?") },
+            text = { Text(if (running) "Claude will be stopped. Its pull request stays on GitHub." else "Its pull request stays on GitHub.") },
+            confirmButton = { TextButton(onClick = { confirmClear = false; onClear() }) { Text("Clear") } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
+    }
     val list = rememberLazyListState()
     LaunchedEffect(task.messages.size) { if (task.messages.isNotEmpty()) list.animateScrollToItem(task.messages.size - 1) }
 
@@ -62,7 +92,13 @@ fun TaskScreen(task: Task, onBack: () -> Unit, onRetry: () -> Unit, onSend: (Str
                         Text(task.repo.fullName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
-                actions = { StatusPill(task.status, Modifier.padding(end = 12.dp), interrupted = task.interrupted) },
+                actions = {
+                    StatusPill(task.status, Modifier.padding(end = 4.dp), interrupted = task.interrupted)
+                    if (running) {
+                        IconButton(onClick = onStop) { Icon(Icons.Rounded.StopCircle, "Stop") }
+                    }
+                    IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteOutline, "Clear task") }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -84,10 +120,29 @@ fun TaskScreen(task: Task, onBack: () -> Unit, onRetry: () -> Unit, onSend: (Str
         ) {
             task.prUrl?.let { url ->
                 item {
-                    AssistChip(
-                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
-                        label = { Text("Pull request #${task.prNumber} on GitHub") },
-                        trailingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AssistChip(
+                            onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                            label = { Text("PR #${task.prNumber}") },
+                            trailingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
+                        )
+                        when (task.prState) {
+                            PrState.Merged -> Text("Merged", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            PrState.Closed -> Text("Closed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            else -> {
+                                ChecksLabel(task.checks, Modifier.weight(1f))
+                                TextButton(onClick = { confirmMerge = true }) { Text("Merge") }
+                            }
+                        }
+                    }
+                }
+            }
+            if (task.costUsd > 0) {
+                item {
+                    Text(
+                        "Cost so far: ${SpokenStatus.money(task.costUsd)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

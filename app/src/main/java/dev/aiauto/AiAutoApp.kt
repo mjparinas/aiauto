@@ -18,6 +18,8 @@ class AiAutoApp : Application() {
         graph.notifier.createChannels()
         graph.engine.resumeAll()
         graph.watchNetwork(this)
+        graph.engine.refreshPullRequests()
+        if (graph.engine.isWatchingPullRequests()) TaskService.ensureRunning(this)
         updater = Updater(this, graph.scope)
         // Fires at startup and each time the app comes back from the background.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

@@ -36,7 +36,17 @@ class TaskService : Service() {
         if (watcher?.isActive != true) {
             watcher = CoroutineScope(Dispatchers.Default).launch {
                 delay(5_000)
-                while (graph.tasks.all().any { graph.engine.isRunning(it.id) }) delay(5_000)
+                var sinceRefresh = 0L
+                // Stay up while Claude works, and while a new pull request's checks are running so the
+                // driver hears the result and green pull requests get merged.
+                while (graph.tasks.all().any { graph.engine.isRunning(it.id) } || graph.engine.isWatchingPullRequests()) {
+                    if (sinceRefresh >= PR_REFRESH_MILLIS) {
+                        graph.engine.refreshPullRequests()
+                        sinceRefresh = 0
+                    }
+                    delay(5_000)
+                    sinceRefresh += 5_000
+                }
                 stopSelf()
             }
         }
@@ -49,6 +59,8 @@ class TaskService : Service() {
     }
 
     companion object {
+        private const val PR_REFRESH_MILLIS = 30_000L
+
         fun ensureRunning(context: Context) {
             runCatching { ContextCompat.startForegroundService(context, Intent(context, TaskService::class.java)) }
         }

@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import dev.aiauto.core.AgentSetup
 import dev.aiauto.core.EngineConfig
+import dev.aiauto.core.Projects
 import dev.aiauto.core.TaskEngine
 import dev.aiauto.data.FileTaskStore
 import dev.aiauto.data.RepoStore
@@ -36,6 +37,10 @@ class Graph(context: Context) {
             override fun githubToken() = secrets.githubToken
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
+            override fun dailyLimitUsd() = settings.dailyLimitUsd
+            override fun spentTodayUsd() = settings.spentTodayUsd
+            override fun addSpend(usd: Double) = settings.addSpend(usd)
+            override fun autoMerge() = settings.autoMerge
         },
         scope = scope,
         onMessage = { task, message ->
@@ -44,6 +49,17 @@ class Graph(context: Context) {
         },
         onProgress = { _, text -> notifier.onProgress(text) },
     )
+
+    /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */
+    val projects = Projects(githubToken = { secrets.githubToken }, scope = scope)
+
+    /** Merges a pull request from the project view, then refreshes any task that owns it. Blocking. */
+    fun mergePull(repo: dev.aiauto.core.RepoRef, number: Int): String {
+        val task = tasks.all().firstOrNull { it.repo.fullName == repo.fullName && it.prNumber == number }
+        val message = if (task != null) engine.mergeNow(task.id) else projects.merge(repo, number)
+        projects.refresh(repo)
+        return message
+    }
 
     /** Resumes tasks that stopped because the connection dropped, as soon as the phone is back online. */
     fun watchNetwork(context: Context) {

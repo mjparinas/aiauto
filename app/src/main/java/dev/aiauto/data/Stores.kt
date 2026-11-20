@@ -54,7 +54,7 @@ class FileTaskStore(context: Context) : TaskStore {
     }
 
     @Synchronized
-    fun remove(id: String) = list.set(list.flow.value.filter { it.id != id })
+    override fun remove(id: String) = list.set(list.flow.value.filter { it.id != id })
 }
 
 class RepoStore(context: Context) {
@@ -78,9 +78,36 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_aloud", true)
         set(value) = prefs.edit().putBoolean("read_aloud", value).apply()
 
+    /** Daily spending cap in US dollars, or null for none. New installs start at [DEFAULT_DAILY_LIMIT]. */
+    var dailyLimitUsd: Double?
+        get() = if (prefs.contains("daily_limit")) prefs.getFloat("daily_limit", 0f).toDouble().takeIf { it > 0 } else DEFAULT_DAILY_LIMIT
+        set(value) = prefs.edit().putFloat("daily_limit", (value ?: 0.0).toFloat()).apply()
+
+    /** Merge a task's pull request once its checks pass. */
+    var autoMerge: Boolean
+        get() = prefs.getBoolean("auto_merge", true)
+        set(value) = prefs.edit().putBoolean("auto_merge", value).apply()
+
+    /** What Claude has cost today, by the phone's local date. Resets at midnight. */
+    @get:Synchronized
+    val spentTodayUsd: Double
+        get() = if (prefs.getString("spend_day", null) == today()) prefs.getFloat("spend_usd", 0f).toDouble() else 0.0
+
+    @Synchronized
+    fun addSpend(usd: Double) {
+        val total = spentTodayUsd + usd
+        prefs.edit().putString("spend_day", today()).putFloat("spend_usd", total.toFloat()).apply()
+    }
+
+    private fun today() = java.time.LocalDate.now().toString()
+
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
         set(value) = prefs.edit().apply {
             if (value == null) remove("agent_setup") else putString("agent_setup", json.encodeToString(AgentSetup.serializer(), value))
         }.apply()
+
+    companion object {
+        const val DEFAULT_DAILY_LIMIT = 20.0
+    }
 }

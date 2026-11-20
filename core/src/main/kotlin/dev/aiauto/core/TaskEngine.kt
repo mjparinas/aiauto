@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import java.util.UUID
@@ -19,6 +20,7 @@ interface TaskStore {
     fun get(id: String): Task?
     fun all(): List<Task>
     fun put(task: Task)
+    fun remove(id: String)
 }
 
 /** Credentials and one-time setup the engine needs. Returning null means "not configured yet". */
@@ -27,6 +29,15 @@ interface EngineConfig {
     fun githubToken(): String?
     fun agentSetup(): AgentSetup?
     fun saveAgentSetup(setup: AgentSetup)
+
+    /** The most Claude may spend per day across all tasks, in US dollars. Null means no limit. */
+    fun dailyLimitUsd(): Double? = null
+    /** What has been spent today so far. */
+    fun spentTodayUsd(): Double = 0.0
+    fun addSpend(usd: Double) {}
+
+    /** Merge a task's pull request once its checks pass. */
+    fun autoMerge(): Boolean = false
 }
 
 /**
@@ -105,8 +116,162 @@ class TaskEngine(
         store.all().filter { it.status == TaskStatus.Failed && it.interrupted }.forEach { retry(it.id) }
     }
 
+    /** Stops a task that's working: Claude is interrupted and the task waits for a new prompt. */
     fun stop(taskId: String) {
+        val wasRunning = running.remove(taskId)?.also { it.cancel() } != null
+        val task = store.get(taskId) ?: return
+        val active = task.status == TaskStatus.Working || task.status == TaskStatus.Starting || task.interrupted
+        if (!wasRunning && !active) return
+        update(taskId) { it.copy(status = TaskStatus.Stopped, interrupted = false, pendingPrompt = null) }
+        append(taskId, Speaker.Status, "Stopped. Reply to give Claude a new direction.", notify = false)
+        val sessionId = task.sessionId ?: return
+        scope.launch(dispatcher) {
+            withClaude { claude ->
+                runCatching { claude.interrupt(sessionId) }
+                runCatching { claude.costUsd(sessionId) }.getOrNull()?.let { recordCost(taskId, it) }
+            }
+        }
+    }
+
+    /** Removes a task from the list. A running one is stopped first, and its Claude session is archived. */
+    fun clear(taskId: String) {
         running.remove(taskId)?.cancel()
+        val task = store.get(taskId) ?: return
+        store.remove(taskId)
+        seenEvents.remove(taskId)
+        val sessionId = task.sessionId ?: return
+        val active = task.status == TaskStatus.Working || task.status == TaskStatus.Starting || task.interrupted
+        scope.launch(dispatcher) {
+            withClaude { claude ->
+                if (active) runCatching { claude.interrupt(sessionId) }
+                runCatching { claude.archive(sessionId) }
+            }
+        }
+    }
+
+    /** Clears every finished task (stopped, failed, or done with no open pull request). Returns how many. */
+    fun clearFinished(): Int {
+        val finished = store.all().filter { it.isFinished && !isRunning(it.id) }
+        finished.forEach { clear(it.id) }
+        return finished.size
+    }
+
+    /** Today's spend against the daily limit, for display. */
+    fun spentTodayUsd(): Double = config.spentTodayUsd()
+
+    private inline fun withClaude(block: (AgentClient) -> Unit) {
+        val key = config.anthropicKey() ?: return
+        runCatching { claudeFactory(key) }.getOrNull()?.use(block)
+    }
+
+    // ---- Pull requests -------------------------------------------------------------------------
+
+    private val mergeRefusals = ConcurrentHashMap<String, String>()
+
+    /** True while some pull request's checks or merge are worth watching, so the app should stay awake. */
+    fun isWatchingPullRequests(): Boolean {
+        val now = clock()
+        return store.all().any { needsWatching(it, now) }
+    }
+
+    private fun needsWatching(task: Task, now: Long): Boolean {
+        if (!task.hasOpenPr || isRunning(task.id)) return false
+        if (now - (task.prOpenedMillis ?: task.updatedMillis) > WATCH_MILLIS) return false
+        return when (task.checks?.state) {
+            null, Checks.Pending, Checks.None -> true
+            Checks.Passing -> config.autoMerge()
+            Checks.Failing, Checks.Unknown -> false
+        }
+    }
+
+    /** Refreshes state and checks for every task with an open pull request, and merges green ones when auto-merge is on. */
+    fun refreshPullRequests(): Job = scope.launch(dispatcher) {
+        store.all().filter { it.hasOpenPr && !isRunning(it.id) }.forEach { task ->
+            currentCoroutineContext().ensureActive()
+            runCatching { refreshPullRequest(task.id) }
+        }
+    }
+
+    /** Fetches one task's pull request and checks, says what changed, and merges it if it's ready. */
+    fun refreshPullRequest(taskId: String) {
+        val task = store.get(taskId) ?: return
+        val number = task.prNumber ?: return
+        val token = config.githubToken() ?: return
+        val github = githubFactory(token)
+        val pr = github.pull(task.repo, number)
+        val state = pr.prState
+        val checks = if (state == PrState.Open && pr.head.sha.isNotEmpty()) github.checks(task.repo, pr.head.sha) else task.checks
+        update(taskId) { it.copy(prState = state, checks = checks, githubAutoMerge = pr.hasGitHubAutoMerge, prUrl = pr.htmlUrl) }
+
+        val now = clock()
+        val willMerge = state == PrState.Open && config.autoMerge() && !pr.draft && !pr.hasGitHubAutoMerge &&
+            checks != null && readyToMerge(checks, task, now)
+        val beforeState = task.prState ?: PrState.Open
+        when {
+            state == PrState.Merged && beforeState != PrState.Merged -> append(taskId, Speaker.Status, "Pull request $number was merged.")
+            state == PrState.Closed && beforeState != PrState.Closed -> append(taskId, Speaker.Status, "Pull request $number was closed without merging.")
+            state == PrState.Open && checks != null && checks.state != task.checks?.state -> when (checks.state) {
+                Checks.Failing -> append(taskId, Speaker.Status, "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}.")
+                Checks.Passing -> append(
+                    taskId, Speaker.Status,
+                    "Checks passed on pull request $number." + when {
+                        willMerge -> " Merging it now."
+                        pr.hasGitHubAutoMerge -> " GitHub will merge it."
+                        else -> ""
+                    },
+                )
+                else -> {}
+            }
+        }
+        if (!willMerge) return
+        val refusalKey = "$taskId:${pr.head.sha}"
+        when (val result = github.merge(task.repo, number)) {
+            MergeResult.Merged, MergeResult.AutoMergeOn -> {
+                update(taskId) { it.copy(prState = PrState.Merged) }
+                append(taskId, Speaker.Status, "Merged pull request $number.")
+            }
+            is MergeResult.Refused -> if (mergeRefusals.put(refusalKey, result.reason) == null) {
+                append(taskId, Speaker.Status, "Couldn't merge pull request $number. ${result.reason}")
+            }
+        }
+    }
+
+    /** Merges a task's pull request now, at the user's request. Returns a sentence saying what happened. */
+    fun mergeNow(taskId: String): String {
+        val task = store.get(taskId) ?: return "That task is gone."
+        val number = task.prNumber ?: return "This task has no pull request."
+        val token = config.githubToken() ?: return "Add a GitHub token in Settings."
+        val message = Projects.mergeMessage(githubFactory(token), task.repo, number)
+        append(taskId, Speaker.Status, message)
+        runCatching { refreshPullRequest(taskId) }
+        return message
+    }
+
+    private fun readyToMerge(checks: ChecksSummary, task: Task, now: Long): Boolean = when (checks.state) {
+        Checks.Passing -> true
+        // A repo without CI: give checks time to show up before treating "none" as green.
+        Checks.None -> now - (task.prOpenedMillis ?: task.updatedMillis) > NO_CHECKS_GRACE_MILLIS
+        else -> false
+    }
+
+    // ---- Spending ------------------------------------------------------------------------------
+
+    private fun limitMessage(limit: Double) =
+        "Stopped at today's ${"$"}${"%.2f".format(java.util.Locale.US, limit)} spending limit. Raise it in Settings to keep going."
+
+    private fun overLimit(): Boolean {
+        val limit = config.dailyLimitUsd() ?: return false
+        return config.spentTodayUsd() >= limit - 0.005
+    }
+
+    /** Records a session's new running total and adds the difference to today's spend. */
+    @Synchronized
+    private fun recordCost(taskId: String, totalUsd: Double) {
+        val task = store.get(taskId) ?: return
+        val delta = totalUsd - task.costUsd
+        if (delta <= 0.0) return
+        update(taskId) { it.copy(costUsd = totalUsd) }
+        runCatching { config.addSpend(delta) }
     }
 
     private fun launchTurn(taskId: String) {
@@ -126,7 +291,10 @@ class TaskEngine(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (Failures.isTransient(e)) interrupt(taskId, e) else fail(taskId, Failures.describe(e))
+                // Stopped or cleared by the user while a call was in flight: don't overwrite that with an error.
+                if (currentCoroutineContext().isActive) {
+                    if (Failures.isTransient(e)) interrupt(taskId, e) else fail(taskId, Failures.describe(e))
+                }
             } finally {
                 runCatching { claude?.close() }
                 running.remove(taskId, currentCoroutineContext()[Job])
@@ -139,6 +307,8 @@ class TaskEngine(
     /** Makes sure the task has a session and that Claude has every prompt. Safe to repeat. */
     private fun prepare(claude: AgentClient, taskId: String) {
         val task = store.get(taskId) ?: return
+        val willSend = task.sessionId == null || task.pendingPrompt != null
+        config.dailyLimitUsd()?.let { if (willSend && overLimit()) throw IllegalStateException(limitMessage(it)) }
         if (task.sessionId == null) {
             val token = config.githubToken() ?: throw IllegalStateException("Add a GitHub token in Settings.")
             val sessionId = try {
@@ -154,6 +324,11 @@ class TaskEngine(
         }
         val current = store.get(taskId) ?: return
         val prompt = current.pendingPrompt ?: return
+        // Cap the session at what's left of today's limit, so Claude stops on its side even if the phone is off.
+        config.dailyLimitUsd()?.let { limit ->
+            val remaining = (limit - config.spentTodayUsd()).coerceAtLeast(0.0)
+            runCatching { claude.setBudget(current.sessionId!!, current.costUsd + remaining) }
+        }
         claude.sendPrompt(current.sessionId!!, prompt)
         update(taskId) { if (it.pendingPrompt == prompt) it.copy(pendingPrompt = null) else it }
     }
@@ -186,9 +361,11 @@ class TaskEngine(
             var heard = false
             val over = try {
                 runInterruptible {
-                    claude.follow(sessionId, seen, onConnected = { failures = 0 }) { update ->
+                    var halted = false
+                    claude.follow(sessionId, seen, onConnected = { failures = 0 }, shouldStop = { halted }) { update ->
                         heard = true
-                        handle(taskId, update)
+                        // Once the turn is over for the app (a failure, or the spending limit), ignore the rest.
+                        if (!halted && handle(claude, taskId, update)) halted = true
                     }
                 }
             } catch (e: CancellationException) {
@@ -207,16 +384,30 @@ class TaskEngine(
             if (quiet > MAX_QUIET_RECONNECTS) throw IllegalStateException("Claude stopped sending updates. Tap Try again to check on it.")
             sleep(QUIET_RECONNECT_MILLIS)
         }
+        runCatching { claude.costUsd(sessionId) }.getOrNull()?.let { recordCost(taskId, it) }
         if (store.get(taskId)?.status == TaskStatus.Working) afterTurn(taskId)
     }
 
     /** Returns true when the turn is over. */
-    private fun handle(taskId: String, update: AgentUpdate): Boolean = when (update) {
+    private fun handle(claude: AgentClient, taskId: String, update: AgentUpdate): Boolean = when (update) {
         is AgentUpdate.Progress -> { progress(taskId, update.text); false }
         is AgentUpdate.Said -> { append(taskId, Speaker.Claude, update.text); false }
         is AgentUpdate.Declined -> { append(taskId, Speaker.Status, "Skipped a risky ${update.toolName} step that needs review"); false }
         is AgentUpdate.TurnDone -> true
         is AgentUpdate.Failed -> { fail(taskId, update.reason); true }
+        is AgentUpdate.BudgetReached -> { fail(taskId, limitMessage(config.dailyLimitUsd() ?: 0.0)); true }
+        is AgentUpdate.Cost -> {
+            recordCost(taskId, update.totalUsd)
+            val limit = config.dailyLimitUsd()
+            if (limit != null && overLimit()) {
+                // A backstop for the session's own budget: stop as soon as the day's limit is reached.
+                store.get(taskId)?.sessionId?.let { id -> runCatching { claude.interrupt(id) } }
+                fail(taskId, limitMessage(limit))
+                true
+            } else {
+                false
+            }
+        }
     }
 
     /** After a turn: open or refresh the pull request, then mark the task done or waiting. */
@@ -231,8 +422,25 @@ class TaskEngine(
                         val pr = github.findPull(task.repo, task.branch) ?: github.openPull(
                             task.repo, task.branch, task.title, prBody(task),
                         )
-                        update(taskId) { it.copy(prUrl = pr.htmlUrl, prNumber = pr.number) }
-                        append(taskId, Speaker.Status, "Pull request ${pr.number} is open for review")
+                        val open = pr.prState == PrState.Open
+                        // GitHub's own auto-merge keeps working with the phone off. It needs the repo setting
+                        // and required checks; otherwise the app merges once it sees the checks pass.
+                        val githubMerges = open && config.autoMerge() && !pr.draft && runCatching { github.enableAutoMerge(pr) }.getOrDefault(false)
+                        update(taskId) {
+                            it.copy(
+                                prUrl = pr.htmlUrl, prNumber = pr.number, prState = pr.prState,
+                                prOpenedMillis = clock(), githubAutoMerge = githubMerges || pr.hasGitHubAutoMerge,
+                            )
+                        }
+                        append(
+                            taskId, Speaker.Status,
+                            when {
+                                !open -> "Pull request ${pr.number} is already ${pr.prState.name.lowercase()}."
+                                githubMerges -> "Pull request ${pr.number} is open. GitHub will merge it when checks pass."
+                                config.autoMerge() -> "Pull request ${pr.number} is open. I'll merge it when checks pass."
+                                else -> "Pull request ${pr.number} is open for review."
+                            },
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -297,6 +505,9 @@ class TaskEngine(
         private const val MAX_RECONNECTS = 8
         private const val MAX_QUIET_RECONNECTS = 30
         private const val QUIET_RECONNECT_MILLIS = 1_000L
+        /** How long after opening a pull request the app keeps watching its checks. */
+        private const val WATCH_MILLIS = 3 * 60 * 60 * 1000L
+        private const val NO_CHECKS_GRACE_MILLIS = 10 * 60 * 1000L
 
         fun titleFrom(request: String): String {
             val words = request.trim().split(Regex("\\s+"))
