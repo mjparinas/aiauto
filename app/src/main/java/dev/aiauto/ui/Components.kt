@@ -61,14 +61,20 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier) {
     }
 }
 
-/** A prompt box with a send button and a mic button that uses the phone's speech recognizer. */
+/**
+ * A prompt box with a send button and a mic button that uses the phone's speech recognizer.
+ * Spoken input is sent right away, together with anything already typed.
+ */
 @Composable
 fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spoken.isNullOrBlank()) text = if (text.isBlank()) spoken else "$text $spoken"
+            if (!spoken.isNullOrBlank()) {
+                onSend((if (text.isBlank()) spoken else "$text $spoken").trim())
+                text = ""
+            }
         }
     }
     Surface(color = MaterialTheme.colorScheme.background) {
