@@ -1,6 +1,7 @@
 package dev.aiauto
 
 import android.content.Context
+import androidx.car.app.connection.CarConnection
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -97,6 +98,17 @@ class Graph(context: Context) {
         val message = if (task != null) engine.mergeNow(task.id) else projects.merge(repo, number)
         projects.refresh(repo)
         return message
+    }
+
+    /** Opens the "Talk to Claude" conversation each time the phone connects to the car, and removes it after. */
+    fun watchCar(context: Context) {
+        var connected = false
+        CarConnection(context.applicationContext).type.observeForever { type ->
+            val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
+            if (now && !connected && isConfigured) notifier.startChat()
+            if (!now && connected) notifier.clearChat()
+            connected = now
+        }
     }
 
     /** Resumes tasks that stopped because the connection dropped, as soon as the phone is back online. */
