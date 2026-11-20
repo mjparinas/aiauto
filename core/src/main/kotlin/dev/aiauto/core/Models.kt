@@ -18,6 +18,8 @@ data class RepoRef(
         /** Accepts `owner/name` or a github.com URL. Returns null when the text isn't a repo. */
         fun parse(text: String): RepoRef? {
             val match = pattern.matchEntire(text.trim()) ?: return null
+            // "." and ".." would turn the API path into a different GitHub endpoint.
+            if (match.groupValues.drop(1).any { it.all { c -> c == '.' } }) return null
             return RepoRef(match.groupValues[1], match.groupValues[2])
         }
     }

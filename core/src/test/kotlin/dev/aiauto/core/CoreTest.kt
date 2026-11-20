@@ -10,6 +10,8 @@ class CoreTest {
         assertEquals(RepoRef("mjparinas", "aiauto"), RepoRef.parse("mjparinas/aiauto"))
         assertEquals(RepoRef("a", "b.c"), RepoRef.parse("https://github.com/a/b.c.git"))
         assertNull(RepoRef.parse("not a repo"))
+        assertNull(RepoRef.parse("../.."))
+        assertNull(RepoRef.parse("owner/.."))
     }
 
     @Test fun cleansMarkdownForSpeech() {
