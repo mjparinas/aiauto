@@ -93,7 +93,7 @@ private fun TaskCard(task: Task, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                StatusPill(task.status)
+                StatusPill(task.status, interrupted = task.interrupted)
             }
             Spacer(Modifier.height(6.dp))
             Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)

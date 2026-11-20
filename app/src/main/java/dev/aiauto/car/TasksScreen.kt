@@ -62,7 +62,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
             TaskStatus.Working -> "Working"
             TaskStatus.NeedsInput -> "Needs your reply"
             TaskStatus.Done -> if (task.prNumber != null) "PR ${task.prNumber} ready" else "Done"
-            TaskStatus.Failed -> "Stopped"
+            TaskStatus.Failed -> if (task.interrupted) "Connection lost" else "Stopped"
         }
     }
 }

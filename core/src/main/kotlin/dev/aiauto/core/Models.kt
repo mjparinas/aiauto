@@ -54,6 +54,10 @@ data class Task(
     val messages: List<TaskMessage> = emptyList(),
     val createdMillis: Long,
     val updatedMillis: Long,
+    /** A prompt that hasn't reached Claude yet. It's sent again when the task resumes. */
+    val pendingPrompt: String? = null,
+    /** Stopped because the connection dropped, not because of Claude. Resumes when the network is back. */
+    val interrupted: Boolean = false,
 ) {
     val lastMessage: TaskMessage? get() = messages.lastOrNull()
 }

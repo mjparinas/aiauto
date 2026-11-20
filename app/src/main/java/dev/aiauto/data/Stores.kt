@@ -18,16 +18,25 @@ private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 private class JsonListFile<T>(private val file: File, private val serializer: KSerializer<T>) {
     val flow = MutableStateFlow(load())
 
-    private fun load(): List<T> = runCatching {
-        if (file.exists()) json.decodeFromString(ListSerializer(serializer), file.readText()) else emptyList()
-    }.getOrDefault(emptyList())
+    private fun load(): List<T> {
+        if (!file.exists()) return emptyList()
+        return runCatching { json.decodeFromString(ListSerializer(serializer), file.readText()) }
+            .getOrElse {
+                // Keep the unreadable file for inspection instead of overwriting it on the next save.
+                runCatching { file.renameTo(File(file.parentFile, file.name + ".bad")) }
+                emptyList()
+            }
+    }
 
     @Synchronized
     fun set(items: List<T>) {
         flow.value = items
-        val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(json.encodeToString(ListSerializer(serializer), items))
-        tmp.renameTo(file)
+        // A full disk shouldn't crash the app or stop a task; the list stays correct in memory.
+        runCatching {
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(json.encodeToString(ListSerializer(serializer), items))
+            if (!tmp.renameTo(file)) tmp.copyTo(file, overwrite = true).also { tmp.delete() }
+        }
     }
 }
 

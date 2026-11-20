@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.aiauto.core.Failures
 import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
 import dev.aiauto.ui.AiAutoTheme
@@ -75,7 +76,14 @@ class MainActivity : ComponentActivity() {
                     is Screen.Detail -> {
                         val task = tasks.firstOrNull { it.id == s.taskId }
                         if (task == null) screen = Screen.Home
-                        else TaskScreen(task, onBack = { screen = Screen.Home }) { text ->
+                        else TaskScreen(
+                            task,
+                            onBack = { screen = Screen.Home },
+                            onRetry = {
+                                g.engine.retry(task.id)
+                                TaskService.ensureRunning(this)
+                            },
+                        ) { text ->
                             g.engine.prompt(task.id, text)
                             TaskService.ensureRunning(this)
                         }
@@ -84,12 +92,16 @@ class MainActivity : ComponentActivity() {
                         state = settingsState(repos).copy(busy = settings.busy, message = settings.message),
                         onBack = { screen = Screen.Home },
                         onSaveKeys = { anthropic, github ->
-                            if (anthropic.isNotBlank()) {
-                                g.secrets.anthropicKey = anthropic
-                                g.settings.agentSetup = null // a new key means a new agent in that account
+                            val saved = runCatching {
+                                if (anthropic.isNotBlank()) {
+                                    g.secrets.anthropicKey = anthropic
+                                    g.settings.agentSetup = null // a new key means a new agent in that account
+                                }
+                                if (github.isNotBlank()) g.secrets.githubToken = github
                             }
-                            if (github.isNotBlank()) g.secrets.githubToken = github
-                            settings = settings.copy(message = "Saved.")
+                            settings = settings.copy(
+                                message = if (saved.isSuccess) "Saved." else "Couldn't save securely on this phone. Try again, or restart the app.",
+                            )
                         },
                         onAddRepo = { text ->
                             val parsed = RepoRef.parse(text)
@@ -103,7 +115,7 @@ class MainActivity : ComponentActivity() {
                                     result.onSuccess { g.repos.add(it) }
                                     settings = settings.copy(
                                         busy = false,
-                                        message = result.fold({ "Added ${it.fullName}." }, { it.message ?: "Couldn't reach that repo." }),
+                                        message = result.fold({ "Added ${it.fullName}." }, { Failures.describe(it) }),
                                     )
                                 }
                             }

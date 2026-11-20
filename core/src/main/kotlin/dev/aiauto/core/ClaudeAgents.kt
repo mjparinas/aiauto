@@ -20,6 +20,10 @@ import com.anthropic.models.beta.sessions.events.BetaManagedAgentsStreamSessionE
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams
 import com.anthropic.models.beta.sessions.events.EventSendParams
+import com.anthropic.core.Timeout
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionEvent
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionStatusIdleEvent
+import java.time.Duration
 import java.util.Optional
 
 /** What a running session reports back to the app. */
@@ -39,17 +43,41 @@ sealed interface AgentUpdate {
     data class Failed(val reason: String) : AgentUpdate
 }
 
+/** What [TaskEngine] needs from Claude. [ClaudeAgents] is the real one; tests use a fake. */
+interface AgentClient : AutoCloseable {
+    fun createSetup(): AgentSetup
+    fun createSession(setup: AgentSetup, task: Task, githubToken: String): String
+    fun sendPrompt(sessionId: String, prompt: String)
+    fun follow(
+        sessionId: String,
+        seenEventIds: MutableSet<String>,
+        onConnected: () -> Unit = {},
+        shouldStop: () -> Boolean = { false },
+        onUpdate: (AgentUpdate) -> Unit,
+    ): Boolean
+}
+
 /**
  * Thin wrapper over Claude Managed Agents: one agent + environment created once,
  * then one session per task with the user's GitHub repo mounted.
  */
-class ClaudeAgents(apiKey: String) : AutoCloseable {
+class ClaudeAgents(apiKey: String) : AgentClient {
     private val client: AnthropicClient = AnthropicOkHttpClient.builder()
         .apiKey(apiKey)
+        // The SDK retries dropped connections, 429s and 5xx on ordinary calls. Streams are reconnected by TaskEngine.
+        .maxRetries(3)
+        .timeout(
+            Timeout.builder()
+                .connect(Duration.ofSeconds(15))
+                // A stream that stays silent this long is treated as dead and reconnected.
+                .read(Duration.ofMinutes(3))
+                .request(Duration.ofMinutes(10))
+                .build(),
+        )
         .build()
 
     /** Creates the agent and environment. Call once per API key and store the result. */
-    fun createSetup(): AgentSetup {
+    override fun createSetup(): AgentSetup {
         val environment = client.beta().environments().create(
             EnvironmentCreateParams.builder()
                 .name("aiauto-env")
@@ -87,7 +115,7 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
     }
 
     /** Creates a session for [task] with the repo cloned at [REPO_PATH]. Returns the session id. */
-    fun createSession(setup: AgentSetup, task: Task, githubToken: String): String {
+    override fun createSession(setup: AgentSetup, task: Task, githubToken: String): String {
         val session = client.beta().sessions().create(
             SessionCreateParams.builder()
                 .agent(
@@ -111,7 +139,7 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
     }
 
     /** Sends a spoken or typed prompt. The first prompt of a task carries the branch to use. */
-    fun sendPrompt(sessionId: String, prompt: String) {
+    override fun sendPrompt(sessionId: String, prompt: String) {
         client.beta().sessions().events().send(
             sessionId,
             EventSendParams.builder()
@@ -127,19 +155,66 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
     /**
      * Streams the session until Claude finishes its turn, fails, or [shouldStop] returns true.
      * Opens the stream first, then lists past events so nothing is reported twice after a reconnect.
+     * If the turn already ended while the app wasn't listening (the phone lost signal, or the app was
+     * closed), that outcome is reported straight from the history instead of waiting forever.
+     *
+     * Returns true when the turn is over, false when the server closed the stream mid-turn and the
+     * caller should reconnect. [onConnected] runs once the stream and history are both loaded.
      */
-    fun follow(sessionId: String, seenEventIds: MutableSet<String>, shouldStop: () -> Boolean = { false }, onUpdate: (AgentUpdate) -> Unit) {
+    override fun follow(
+        sessionId: String,
+        seenEventIds: MutableSet<String>,
+        onConnected: () -> Unit,
+        shouldStop: () -> Boolean,
+        onUpdate: (AgentUpdate) -> Unit,
+    ): Boolean {
         client.beta().sessions().events().streamStreaming(sessionId).use { stream ->
-            for (past in client.beta().sessions().events().list(sessionId).autoPager()) {
+            var lastUserMessage = -1
+            var lastStop: Pair<Int, BetaManagedAgentsSessionEvent>? = null
+            val confirmed = HashSet<String>()
+            for ((index, past) in client.beta().sessions().events().list(sessionId).autoPager().withIndex()) {
                 eventId(past._json())?.let { seenEventIds.add(it) }
+                when {
+                    past.isUserMessage() -> lastUserMessage = index
+                    past.isUserToolConfirmation() -> confirmed.add(past.asUserToolConfirmation().toolUseId())
+                    past.isSessionStatusIdle() || past.isSessionStatusTerminated() -> lastStop = index to past
+                    past.isSessionStatusRunning() || past.isSessionStatusRescheduled() -> lastStop = null
+                }
             }
+            onConnected()
+            val stop = lastStop
+            if (stop != null && stop.first > lastUserMessage && catchUp(sessionId, stop.second, confirmed, onUpdate)) return true
             for (event in stream.stream()) {
-                if (shouldStop()) return
+                if (shouldStop()) return true
                 val id = eventId(event._json())
                 if (id != null && !seenEventIds.add(id)) continue
-                if (handle(sessionId, event, onUpdate)) return
+                if (handle(sessionId, event, onUpdate)) return true
             }
         }
+        return false
+    }
+
+    /** Reports a stop that happened before we connected. Returns true when the turn is over. */
+    private fun catchUp(
+        sessionId: String,
+        event: BetaManagedAgentsSessionEvent,
+        confirmed: Set<String>,
+        onUpdate: (AgentUpdate) -> Unit,
+    ): Boolean {
+        if (event.isSessionStatusTerminated()) {
+            onUpdate(AgentUpdate.Failed("The session ended."))
+            return true
+        }
+        val reason = event.asSessionStatusIdle().stopReason()
+        if (reason.isRequiresAction()) {
+            // Claude was waiting on a tool approval when we lost the connection. Decline it as usual.
+            reason.asRequiresAction().eventIds().filter { it !in confirmed }.forEach { id ->
+                decline(sessionId, id)
+                onUpdate(AgentUpdate.Declined("tool"))
+            }
+            return false
+        }
+        return idleOutcome(reason, onUpdate)
     }
 
     /** Returns true when the turn is over. */
@@ -171,23 +246,29 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
             }
             event.isSessionStatusIdle() -> {
                 val reason = event.asSessionStatusIdle().stopReason()
-                return when {
-                    reason.isRequiresAction() -> false
-                    reason.isEndTurn() -> { onUpdate(AgentUpdate.TurnDone); true }
-                    reason.isRefusal() -> { onUpdate(AgentUpdate.Failed("Claude declined this request.")); true }
-                    reason.isBudgetReached() -> { onUpdate(AgentUpdate.Failed("The session hit its spending limit.")); true }
-                    else -> { onUpdate(AgentUpdate.Failed("The session stopped after repeated errors.")); true }
-                }
+                return if (reason.isRequiresAction()) false else idleOutcome(reason, onUpdate)
             }
             event.isSessionStatusTerminated() -> {
                 onUpdate(AgentUpdate.Failed("The session ended."))
                 return true
             }
             event.isSessionError() -> {
-                onUpdate(AgentUpdate.Failed(event.asSessionError().error().message()))
+                // Session errors are usually retried by Claude itself; the idle event that follows says whether it gave up.
+                val message = SpokenStatus.clean(event.asSessionError().error().message()).take(100)
+                onUpdate(AgentUpdate.Progress("Claude hit a problem and is retrying: $message"))
             }
         }
         return false
+    }
+
+    private fun idleOutcome(reason: BetaManagedAgentsSessionStatusIdleEvent.StopReason, onUpdate: (AgentUpdate) -> Unit): Boolean {
+        when {
+            reason.isEndTurn() -> onUpdate(AgentUpdate.TurnDone)
+            reason.isRefusal() -> onUpdate(AgentUpdate.Failed("Claude declined this request."))
+            reason.isBudgetReached() -> onUpdate(AgentUpdate.Failed("The session hit its spending limit."))
+            else -> onUpdate(AgentUpdate.Failed("Claude stopped after repeated errors on its side. Tap Try again to continue."))
+        }
+        return true
     }
 
     private fun decline(sessionId: String, toolUseId: String) {
