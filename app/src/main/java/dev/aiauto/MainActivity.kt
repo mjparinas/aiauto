@@ -196,6 +196,16 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
+                        onLoadGithubRepos = {
+                            val token = g.secrets.githubToken
+                            withContext(Dispatchers.IO) { runCatching { GitHub(token!!).myRepos() } }
+                        },
+                        onAddRepos = { picked ->
+                            picked.forEach { g.repos.add(it) }
+                            settings = settings.copy(
+                                message = if (picked.size == 1) "Added ${picked[0].fullName}." else "Added ${picked.size} repositories.",
+                            )
+                        },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
                         onQuietMode = { g.settings.quietMode = it; settings = settings.copy(quietMode = it) },
                         onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },

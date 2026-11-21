@@ -24,6 +24,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -45,6 +47,8 @@ import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +63,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -113,6 +119,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSaveKeys: (anthropic: String, github: String) -> Unit,
     onAddRepo: (String) -> Unit,
+    onLoadGithubRepos: suspend () -> Result<List<RepoRef>>,
+    onAddRepos: (List<RepoRef>) -> Unit,
     onReadAloud: (Boolean) -> Unit,
     onQuietMode: (Boolean) -> Unit,
     onAutoMerge: (Boolean) -> Unit,
@@ -173,10 +181,10 @@ fun SettingsScreen(
             SettingsCard {
                 state.repos.forEach { repo -> SettingRow(Icons.Rounded.FolderOpen, BadgeHue.Blue, repo.fullName) }
                 SettingRow(
-                    Icons.Rounded.Add, BadgeHue.Green, "Add a repository",
-                    if (state.hasGithubToken) "Enter it as owner/name" else "Save a GitHub token first",
+                    Icons.Rounded.Add, BadgeHue.Green, "Add repositories",
+                    if (state.hasGithubToken) "Pick from your GitHub account" else "Save a GitHub token first",
                     enabled = !state.busy && state.hasGithubToken,
-                ) { dialog = SettingsDialog.AddRepo }
+                ) { dialog = SettingsDialog.PickRepos }
             }
 
             SectionHeader("In the car")
@@ -261,6 +269,13 @@ fun SettingsScreen(
             secret = true,
             onDismiss = { dialog = null },
         ) { onSaveKeys("", it) }
+        SettingsDialog.PickRepos -> PickReposDialog(
+            saved = state.repos,
+            load = onLoadGithubRepos,
+            onDismiss = { dialog = null },
+            onManual = { dialog = SettingsDialog.AddRepo },
+            onAdd = onAddRepos,
+        )
         SettingsDialog.AddRepo -> TextDialog(
             title = "Add a repository",
             label = "owner/repo",
@@ -290,7 +305,7 @@ fun SettingsScreen(
     }
 }
 
-private enum class SettingsDialog { AnthropicKey, GithubToken, AddRepo, DailyLimit, Theme }
+private enum class SettingsDialog { AnthropicKey, GithubToken, PickRepos, AddRepo, DailyLimit, Theme }
 
 /** Small capitals over each card, lined up with the text on the card below it. A heading for screen readers. */
 @Composable
@@ -500,6 +515,77 @@ private fun TextDialog(
             ) { Text(confirm) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Lists the repos the GitHub token can push to, each with a checkbox, so several can be added at once.
+ * Repos already saved show ticked and can't be unticked here. "Enter manually" falls back to typing owner/name,
+ * for a repo the list doesn't include.
+ */
+@Composable
+private fun PickReposDialog(
+    saved: List<RepoRef>,
+    load: suspend () -> Result<List<RepoRef>>,
+    onDismiss: () -> Unit,
+    onManual: () -> Unit,
+    onAdd: (List<RepoRef>) -> Unit,
+) {
+    val loaded by produceState<Result<List<RepoRef>>?>(null) { value = load() }
+    val savedNames = saved.map { it.fullName }.toSet()
+    val picked = remember { mutableStateListOf<RepoRef>() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Add repositories") },
+        text = {
+            val result = loaded
+            when {
+                result == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                result.isFailure -> Text(
+                    "Couldn't load your repos. ${dev.aiauto.core.Failures.describe(result.exceptionOrNull()!!)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                result.getOrThrow().isEmpty() -> Text(
+                    "No repos found that this token can push to.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                else -> LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                    items(result.getOrThrow(), key = { it.fullName }) { repo ->
+                        val already = repo.fullName in savedNames
+                        val on = already || repo in picked
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.small)
+                                .toggleable(value = on, enabled = !already, role = Role.Checkbox, onValueChange = {
+                                    if (it) picked.add(repo) else picked.remove(repo)
+                                })
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = on, onCheckedChange = null, enabled = !already)
+                            Spacer(Modifier.width(12.dp))
+                            RowText(repo.fullName, if (already) "Already added" else null, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(picked.toList()); onDismiss() },
+                enabled = picked.isNotEmpty(),
+            ) { Text(if (picked.size > 1) "Add ${picked.size}" else "Add") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onManual) { Text("Enter manually") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
     )
 }
 
