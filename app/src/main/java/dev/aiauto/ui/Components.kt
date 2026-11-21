@@ -148,7 +148,7 @@ fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> 
     }
 }
 
-/** A small colored label for a pull request's checks. */
+/** A small coloured label for a pull request's checks. */
 @Composable
 fun ChecksLabel(summary: dev.aiauto.core.ChecksSummary?, modifier: Modifier = Modifier) {
     val color = when (summary?.state) {
