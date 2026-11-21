@@ -30,6 +30,8 @@ class TaskEngineTest {
         override fun githubToken() = "token"
         override fun agentSetup() = setup
         override fun saveAgentSetup(setup: AgentSetup) { this.setup = setup }
+        var quiet = false
+        override fun quietMode() = quiet
     }
 
     /** Scripted Claude: each list entry is what one call does, then it behaves normally. */
@@ -94,6 +96,24 @@ class TaskEngineTest {
         assertEquals(1, claude.sessionsCreated)
         assertEquals(1, claude.sent.size)
         assertTrue(done.messages.any { it.text == "All done." })
+    }
+
+    @Test fun quietModeAnnouncesOnlyTheResult() {
+        config.quiet = true
+        claude.followSteps.add(
+            listOf(
+                AgentUpdate.Said("Looking at the settings screen."),
+                AgentUpdate.Progress("Editing files"),
+                AgentUpdate.Said("Added the toggle and tests pass."),
+                AgentUpdate.TurnDone,
+            ),
+        )
+        val task = engine().start(repo, "add a toggle")
+        val done = store.get(task.id)!!
+        assertEquals(TaskStatus.Done, done.status)
+        assertTrue(done.messages.any { it.text == "Looking at the settings screen." })
+        assertFalse(spoken.any { it == "Looking at the settings screen." || it.startsWith("Claude is starting") })
+        assertEquals("Added the toggle and tests pass.", spoken.first())
     }
 
     @Test fun recreatesAMissingAgentSetupOnce() {

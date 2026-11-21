@@ -30,6 +30,9 @@ interface EngineConfig {
     fun agentSetup(): AgentSetup?
     fun saveAgentSetup(setup: AgentSetup)
 
+    /** Quiet mode: only announce each turn's result, failures and pull requests, not every step. */
+    fun quietMode(): Boolean = false
+
     /** The most Claude may spend per day across all tasks, in US dollars. Null means no limit. */
     fun dailyLimitUsd(): Double? = null
     /** What has been spent today so far. */
@@ -355,7 +358,7 @@ class TaskEngine(
             }
             val request = task.messages.filter { it.speaker == Speaker.You }.joinToString("\n") { it.text }
             update(taskId) { it.copy(sessionId = sessionId, pendingPrompt = ClaudeAgents.firstPrompt(it, request)) }
-            append(taskId, Speaker.Status, "Claude is starting on ${task.repo.name}")
+            append(taskId, Speaker.Status, "Claude is starting on ${task.repo.name}", notify = !config.quietMode())
         }
         val current = store.get(taskId) ?: return
         val prompt = current.pendingPrompt ?: return
@@ -426,8 +429,8 @@ class TaskEngine(
     /** Returns true when the turn is over. */
     private fun handle(claude: AgentClient, taskId: String, update: AgentUpdate): Boolean = when (update) {
         is AgentUpdate.Progress -> { progress(taskId, update.text); false }
-        is AgentUpdate.Said -> { append(taskId, Speaker.Claude, update.text); false }
-        is AgentUpdate.Declined -> { append(taskId, Speaker.Status, "Skipped a risky ${update.toolName} step that needs review"); false }
+        is AgentUpdate.Said -> { append(taskId, Speaker.Claude, update.text, notify = !config.quietMode()); false }
+        is AgentUpdate.Declined -> { append(taskId, Speaker.Status, "Skipped a risky ${update.toolName} step that needs review", notify = !config.quietMode()); false }
         is AgentUpdate.TurnDone -> true
         is AgentUpdate.Failed -> { fail(taskId, update.reason); true }
         is AgentUpdate.BudgetReached -> { fail(taskId, limitMessage(config.dailyLimitUsd() ?: 0.0)); true }
@@ -448,6 +451,11 @@ class TaskEngine(
     /** After a turn: open or refresh the pull request, then mark the task done or waiting. */
     private suspend fun afterTurn(taskId: String) {
         val task = store.get(taskId) ?: return
+        if (config.quietMode()) {
+            // Intermediate messages were held back; announce only Claude's final word for this turn.
+            task.messages.takeLastWhile { it.speaker != Speaker.You }.lastOrNull { it.speaker == Speaker.Claude }
+                ?.let { runCatching { onMessage(task, it) } }
+        }
         val token = config.githubToken()
         if (token != null && task.prNumber == null) {
             try {
@@ -534,7 +542,7 @@ class TaskEngine(
             update(taskId) { it.copy(messages = it.messages.dropLast(1)) }
         }
         append(taskId, Speaker.Status, text, notify = false, idPrefix = PROGRESS)
-        store.get(taskId)?.let { runCatching { onProgress(it, text) } }
+        if (!config.quietMode()) store.get(taskId)?.let { runCatching { onProgress(it, text) } }
     }
 
     private fun append(taskId: String, speaker: Speaker, text: String, notify: Boolean = true, idPrefix: String = "m-") {

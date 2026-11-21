@@ -41,6 +41,7 @@ class Graph(context: Context) {
             override fun githubToken() = secrets.githubToken
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
+            override fun quietMode() = settings.quietMode
             override fun dailyLimitUsd() = settings.dailyLimitUsd
             override fun spentTodayUsd() = settings.spentTodayUsd
             override fun addSpend(usd: Double) = settings.addSpend(usd)

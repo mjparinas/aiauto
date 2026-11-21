@@ -46,6 +46,7 @@ data class SettingsState(
     val hasGithubToken: Boolean,
     val repos: List<RepoRef>,
     val readAloud: Boolean,
+    val quietMode: Boolean,
     val autoMerge: Boolean,
     val dailyLimitUsd: Double?,
     val spentTodayUsd: Double,
@@ -62,6 +63,7 @@ fun SettingsScreen(
     onAddRepo: (String) -> Unit,
     onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
+    onQuietMode: (Boolean) -> Unit,
     onAutoMerge: (Boolean) -> Unit,
     onDailyLimit: (Double?) -> Unit,
 ) {
@@ -139,6 +141,17 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.readAloud, onCheckedChange = onReadAloud)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Quiet mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Only tells you the result of each request, not every step along the way.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.quietMode, onCheckedChange = onQuietMode)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)

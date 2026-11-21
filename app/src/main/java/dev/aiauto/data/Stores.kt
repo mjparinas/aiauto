@@ -78,6 +78,10 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_aloud", true)
         set(value) = prefs.edit().putBoolean("read_aloud", value).apply()
 
+    var quietMode: Boolean
+        get() = prefs.getBoolean("quiet_mode", false)
+        set(value) = prefs.edit().putBoolean("quiet_mode", value).apply()
+
     /** Daily spending cap in US dollars, or null for none. New installs start at [DEFAULT_DAILY_LIMIT]. */
     var dailyLimitUsd: Double?
         get() = if (prefs.contains("daily_limit")) prefs.getFloat("daily_limit", 0f).toDouble().takeIf { it > 0 } else DEFAULT_DAILY_LIMIT
