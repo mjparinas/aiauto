@@ -13,6 +13,7 @@ internal class PullRequests(
     private val clock: () -> Long,
     private val githubFactory: (String) -> GitHub,
     private val autoFix: (taskId: String, prompt: String) -> Unit = { _, _ -> },
+    private val alert: (taskId: String, kind: AlertKind, text: String) -> Unit = { _, _, _ -> },
 ) {
     private val mergeRefusals = ConcurrentHashMap<String, String>()
 
@@ -102,7 +103,10 @@ internal class PullRequests(
                         journal.status(taskId, "$failed Asking Claude to fix them.")
                     } else {
                         journal.update(taskId) { it.copy(pending = PendingAction.FixChecks) }
-                        journal.status(taskId, "$failed Say yes to have Claude fix them.")
+                        val question = "$failed Say yes to have Claude fix them."
+                        // The alert posts and reads this line itself, so the regular update stays quiet.
+                        journal.status(taskId, question, notify = false)
+                        alert(taskId, AlertKind.ChecksFailed, question)
                     }
                 }
                 Checks.Passing -> journal.status(

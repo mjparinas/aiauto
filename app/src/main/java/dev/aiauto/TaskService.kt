@@ -52,6 +52,7 @@ class TaskService : Service() {
                     // One bad round must not kill the watcher, or tasks would stop being retried and watched.
                     try {
                         graph.engine.resumeInterrupted()
+                        graph.engine.checkStuck()
                         if (sinceRefresh >= PR_REFRESH_MILLIS) {
                             graph.engine.refreshPullRequests()
                             sinceRefresh = 0

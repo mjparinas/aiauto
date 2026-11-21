@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.IconCompat
 import dev.aiauto.MainActivity
 import dev.aiauto.R
+import dev.aiauto.core.AlertKind
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Speaker as Who
 import dev.aiauto.core.Task
@@ -38,6 +39,11 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_TASKS, "Task updates", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_WORKING, "Claude is working", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(
+            NotificationChannel(CH_ALERTS, "Alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Failed checks, questions from Claude, and tasks that look stuck. Shown even in quiet mode."
+            },
+        )
     }
 
     fun onMessage(task: Task, message: TaskMessage) {
@@ -69,6 +75,34 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             style.addMessage(m.text, m.timeMillis, if (m.speaker == Who.You) me else claude)
         }
         notify(task.id.hashCode(), style, replyTo = task.id)
+    }
+
+    /**
+     * Something the driver should hear about now: failed checks, a question from Claude, or a stuck task. It replaces
+     * the task's conversation with a titled alert that Android Auto reads out, and a voice reply goes straight to the
+     * task, so "yes" fixes the checks and "stop" stops a stuck task. Quiet mode doesn't hold alerts back.
+     */
+    fun alert(task: Task, kind: AlertKind, text: String) {
+        val title = when (kind) {
+            AlertKind.ChecksFailed -> "Checks failed"
+            AlertKind.Question -> "Claude needs your answer"
+            AlertKind.Stuck -> "Task looks stuck"
+        }
+        val style = NotificationCompat.MessagingStyle(me)
+            .setConversationTitle("$title: ${task.repo.name}")
+            .setGroupConversation(false)
+        task.messages.takeLast(MAX_MESSAGES - 1).filter { it.text != text }.forEach { m ->
+            style.addMessage(m.text, m.timeMillis, if (m.speaker == Who.You) me else claude)
+        }
+        style.addMessage(text, System.currentTimeMillis(), claude)
+        val quick = when (kind) {
+            AlertKind.ChecksFailed -> "Fix it" to "yes"
+            AlertKind.Stuck -> "Stop" to "stop"
+            AlertKind.Question -> null
+        }
+        notify(task.id.hashCode(), style, replyTo = task.id, channel = CH_ALERTS, quick = quick, onlyAlertOnce = kind == AlertKind.Question)
+        // A question was already read out as Claude's own message; the other alerts are new lines.
+        if (kind != AlertKind.Question && settings.readAloudInCar && speaker.inCar) speaker.speak(text)
     }
 
     /** Opens a fresh conversation asking what to do in [repo]. Replying by voice starts a task. */
@@ -121,7 +155,16 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         .setContentIntent(openApp(null))
         .build()
 
-    private fun notify(id: Int, style: NotificationCompat.MessagingStyle, replyTo: String) {
+    private fun notify(
+        id: Int,
+        style: NotificationCompat.MessagingStyle,
+        replyTo: String,
+        channel: String = CH_TASKS,
+        /** A one-tap reply for the phone, as its button label and the text it sends. */
+        quick: Pair<String, String>? = null,
+        /** Don't sound again when this replaces a notification that just sounded. */
+        onlyAlertOnce: Boolean = false,
+    ) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
             android.os.Build.VERSION.SDK_INT >= 33
         ) return
@@ -146,13 +189,24 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             .setShowsUserInterface(false)
             .build()
 
-        val notification = NotificationCompat.Builder(context, CH_TASKS)
+        val quickAction = quick?.let { (label, text) ->
+            val intent = PendingIntent.getBroadcast(
+                context, id + 1,
+                Intent(context, ReplyReceiver::class.java).setAction(ReplyReceiver.ACTION_QUICK)
+                    .putExtra(ReplyReceiver.EXTRA_TARGET, replyTo).putExtra(ReplyReceiver.EXTRA_QUICK_TEXT, text),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            NotificationCompat.Action.Builder(R.drawable.ic_glyph, label, intent).setShowsUserInterface(false).build()
+        }
+
+        val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_glyph)
             .setColor(0xFFC96F4A.toInt())
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setOnlyAlertOnce(false)
+            .setOnlyAlertOnce(onlyAlertOnce)
             .addAction(reply)
+            .apply { quickAction?.let(::addAction) }
             .addInvisibleAction(markRead)
             .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) || it == CHAT_TARGET }))
             .build()
@@ -172,6 +226,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
     companion object {
         const val CH_TASKS = "tasks"
         const val CH_WORKING = "working"
+        const val CH_ALERTS = "alerts"
         const val WORKING_ID = 1
         const val NEW_PREFIX = "new:"
         const val CHAT_TARGET = "chat"

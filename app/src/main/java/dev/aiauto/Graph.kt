@@ -60,6 +60,10 @@ class Graph(context: Context) {
             TaskService.ensureRunning(context)
         },
         onProgress = { _, text -> notifier.onProgress(text) },
+        onAlert = { task, kind, text ->
+            notifier.alert(task, kind, text)
+            TaskService.ensureRunning(context)
+        },
     )
 
     /** Status, stop and merge by voice. */
