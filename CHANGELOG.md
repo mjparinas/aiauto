@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.1
+
+- New app icon again: a cruise control speedometer with the set-speed marker outside the dial, replacing the
+  prompt sign from v0.7.0. It is used for the launcher icon (with a themed-icon version), the car screen and
+  notifications.
+
 ## v0.7.0
 
 - New app icon: a road-sign ring holding a terminal prompt, replacing the old sparkle. It is used for the launcher

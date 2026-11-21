@@ -1,14 +1,19 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- Prompt sign: a road-sign ring holding a terminal prompt. Scaled to sit inside the adaptive-icon safe zone. -->
+    <!-- Cruise control: a speedometer with the set-speed marker outside the dial. Scaled into the adaptive-icon safe zone. -->
     <group android:pivotX="54" android:pivotY="54" android:scaleX="0.68" android:scaleY="0.68">
-        <path android:strokeColor="#C96F4A" android:strokeWidth="8"
-            android:pathData="M54,27 A27,27 0 1,1 54,81 A27,27 0 1,1 54,27 Z" />
-        <path android:strokeColor="#2A2825" android:strokeWidth="6"
-            android:strokeLineCap="round" android:strokeLineJoin="round"
-            android:pathData="M40,44 L50,54 L40,64" />
-        <path android:strokeColor="#2A2825" android:strokeWidth="6" android:strokeLineCap="round"
-            android:pathData="M56,65 L69,65" />
+        <group android:translateY="2.5">
+            <path android:strokeColor="#2A2825" android:strokeWidth="6.5" android:strokeLineCap="round"
+                android:pathData="M38.44,75.56 A22,22 0 1,1 69.56,75.56" />
+            <path android:strokeColor="#2A2825" android:strokeWidth="3" android:strokeLineCap="round"
+                android:pathData="M42,60 L39,60 M45.51,51.51 L43.39,49.39 M62.49,51.51 L64.61,49.39 M66,60 L69,60" />
+            <path android:strokeColor="#C96F4A" android:strokeWidth="5.5" android:strokeLineCap="round"
+                android:pathData="M54,60 L58.64,45.73" />
+            <path android:fillColor="#C96F4A"
+                android:pathData="M48.5,60 A5.5,5.5 0 1,0 59.5,60 A5.5,5.5 0 1,0 48.5,60 Z" />
+            <path android:fillColor="#C96F4A" android:strokeColor="#C96F4A" android:strokeWidth="2.5" android:strokeLineJoin="round"
+                android:pathData="M62.5,33.85 L59.25,24.89 L70.39,28.51 Z" />
+        </group>
     </group>
 </vector>
