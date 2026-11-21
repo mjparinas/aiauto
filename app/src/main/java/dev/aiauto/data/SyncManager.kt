@@ -2,9 +2,10 @@ package dev.aiauto.data
 
 import android.util.Log
 import dev.aiauto.core.Failures
-import dev.aiauto.core.GistSync
 import dev.aiauto.core.GitHub
 import dev.aiauto.core.GitHubException
+import dev.aiauto.core.RepoSync
+import dev.aiauto.core.SyncRepoNotPrivate
 import dev.aiauto.core.SyncSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * Syncs repos, tasks, settings and the car chat's memory through a secret gist on the user's GitHub account.
+ * Syncs repos, tasks, settings and the car chat's memory through a private repo on the user's GitHub account.
  * Runs every few minutes while the app is alive, shortly after tasks change, and when asked from Settings.
  */
 class SyncManager(
@@ -32,6 +33,7 @@ class SyncManager(
     private val removeTask: (String) -> Unit = tasks::remove,
 ) {
     private val lock = Mutex()
+    @Volatile private var checkedGist = false
 
     /** Starts the background rounds. Each one does nothing while sync is off. */
     @OptIn(FlowPreview::class)
@@ -86,8 +88,12 @@ class SyncManager(
             removedTasks = tasks.removedIds(),
             chatForgottenMillis = chat.forgottenMillis,
         )
-        val (gistId, merged) = GistSync(GitHub(token)).sync(settings.syncGistId, local)
-        settings.syncGistId = gistId
+        // The first round since the app started also moves an old sync gist into the repo and deletes it, in case a
+        // device still on an older version made one again.
+        val result = RepoSync(GitHub(token)).sync(local, checkGist = !checkedGist)
+        checkedGist = true
+        if (result.movedGist) settings.syncGistId = null
+        val merged = result.merged
 
         // Tasks cleared on another device go here too, instead of coming back on the next round.
         tasks.rememberRemoved(merged.removedTasks)
@@ -103,8 +109,10 @@ class SyncManager(
     }
 
     private fun describe(e: Exception): String = when {
+        e is SyncRepoNotPrivate -> "${e.repo} is public, so sync is paused. Make it private on GitHub, then sync again."
         e is GitHubException && (e.code == 403 || e.code == 404) ->
-            "Your GitHub token can't use gists. Edit the token on GitHub and set Gists to read and write."
+            "Your GitHub token can't make or use the private ${RepoSync.REPO} repo. Make that repo on GitHub as private, " +
+                "and give the token Contents read and write on it."
         e is GitHubException && e.code == 401 -> "GitHub didn't accept the token. Save a new one above."
         else -> Failures.describe(e)
     }

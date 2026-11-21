@@ -81,51 +81,89 @@ object SyncMerge {
     )
 }
 
+/** The sync repo exists but anyone can see it, so the app won't write tasks and chats there. */
+class SyncRepoNotPrivate(val repo: String) : IllegalStateException("$repo is public, so sync won't use it. Make it private on GitHub.")
+
 /**
- * Keeps a [SyncSnapshot] in one secret gist on the user's GitHub account, found by its file name, so every device
- * signed in with the same GitHub account shares it. The token needs the Gists permission set to read and write.
+ * Keeps a [SyncSnapshot] in one file of a private repo on the user's GitHub account, so every device signed in with
+ * the same account shares it and nobody else can read it. The app makes the repo on first use. The token needs
+ * Contents set to read and write on that repo, and Administration set to read and write to make it.
+ *
+ * Sync used to live in a secret gist, which anyone with its link can read. [sync] moves a gist it finds into the repo,
+ * then deletes the gist.
  */
-class GistSync(private val github: GitHub) {
+class RepoSync(private val github: GitHub, private val repoName: String = REPO) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
-    /** Finds the sync gist, or null when no device has made one yet. */
-    fun find(): String? = github.myGists().firstOrNull { FILE in it.files }?.id
-
-    fun read(gistId: String): SyncSnapshot? =
-        github.gistFile(gistId, FILE)?.takeIf { it.isNotBlank() }?.let { json.decodeFromString(SyncSnapshot.serializer(), it) }
-
-    fun write(gistId: String, snapshot: SyncSnapshot) = github.updateGist(gistId, FILE, encode(snapshot))
-
-    fun create(snapshot: SyncSnapshot): String = github.createGist(DESCRIPTION, FILE, encode(snapshot))
+    /** How a round went: the merged snapshot to apply locally, and whether an old gist was moved over and deleted. */
+    data class Result(val merged: SyncSnapshot, val movedGist: Boolean)
 
     /**
-     * One round: reads the gist (making it if there is none), merges it with [local], and writes the result back
-     * when it differs. Returns the gist id and the merged snapshot for the caller to apply locally. Blocking.
+     * One round: reads the sync file (making the repo when there is none), merges it with [local], and writes the
+     * result back when it differs. With [checkGist], also folds in and deletes an old sync gist. Blocking.
      */
-    fun sync(knownGistId: String?, local: SyncSnapshot): Pair<String, SyncSnapshot> {
-        val id = knownGistId ?: find()
-        if (id == null) {
+    fun sync(local: SyncSnapshot, checkGist: Boolean = false): Result {
+        val repo = ensureRepo()
+        val gist = if (checkGist) LegacyGist(github).takeOver() else null
+        val start = gist?.second?.let { SyncMerge.merge(local, it) } ?: local
+        val merged = try {
+            round(repo, start)
+        } catch (e: GitHubException) {
+            // Another device wrote the file between our read and write. Read it again and merge once more.
+            if (e.code != 409 && e.code != 422) throw e
+            round(repo, start)
+        }
+        // Only delete the gist once its contents are safely in the repo.
+        gist?.let { (id, _) -> runCatching { github.deleteGist(id) } }
+        return Result(merged, gist != null)
+    }
+
+    private fun round(repo: RepoRef, local: SyncSnapshot): SyncSnapshot {
+        val file = github.repoFile(repo, FILE)
+        if (file == null) {
             // Marked as changed, so a device that joins later with untouched defaults takes these settings.
             val first = local.copy(settingsChangedMillis = maxOf(1L, local.settingsChangedMillis))
-            return create(SyncMerge.forUpload(first)) to first
+            github.putRepoFile(repo, FILE, encode(SyncMerge.forUpload(first)), sha = null, message = COMMIT_MESSAGE)
+            return first
         }
-        val remote = try {
-            read(id)
-        } catch (e: GitHubException) {
-            // The gist was deleted. Start a new one.
-            if (e.code == 404 && knownGistId != null) return sync(null, local)
-            throw e
-        }
+        val remote = file.content.takeIf { it.isNotBlank() }?.let { json.decodeFromString(SyncSnapshot.serializer(), it) }
         val merged = if (remote == null) local else SyncMerge.merge(local, remote)
         val upload = SyncMerge.forUpload(merged)
-        if (remote == null || upload != SyncMerge.forUpload(remote)) write(id, upload)
-        return id to merged
+        if (remote == null || upload != SyncMerge.forUpload(remote)) {
+            github.putRepoFile(repo, FILE, encode(upload), sha = file.sha, message = COMMIT_MESSAGE)
+        }
+        return merged
+    }
+
+    private fun ensureRepo(): RepoRef {
+        val login = github.myLogin()
+        val existing = github.repoVisibility(login, repoName)
+        if (existing != null) {
+            if (!existing.second) throw SyncRepoNotPrivate("$login/$repoName")
+            return existing.first
+        }
+        return github.createPrivateRepo(repoName, DESCRIPTION)
     }
 
     private fun encode(snapshot: SyncSnapshot) = json.encodeToString(SyncSnapshot.serializer(), snapshot)
 
     companion object {
+        const val REPO = "cruise-control-sync"
         const val FILE = "cruise-control-sync.json"
         const val DESCRIPTION = "Cruise Control sync data (repos, tasks and settings). Keys and tokens are not stored here."
+        const val COMMIT_MESSAGE = "Sync"
     }
+}
+
+/** The old sync gist, read once so its contents can move to the private repo. */
+internal class LegacyGist(private val github: GitHub) {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /** The old gist's id and contents, or null when there is none or the token can't read gists. */
+    fun takeOver(): Pair<String, SyncSnapshot?>? = runCatching {
+        val id = github.myGists().firstOrNull { RepoSync.FILE in it.files }?.id ?: return null
+        val snapshot = github.gistFile(id, RepoSync.FILE)?.takeIf { it.isNotBlank() }
+            ?.let { json.decodeFromString(SyncSnapshot.serializer(), it) }
+        id to snapshot
+    }.getOrNull()
 }

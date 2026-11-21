@@ -2,7 +2,9 @@ package dev.aiauto.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SyncTest {
     private val repo = RepoRef("me", "app")
@@ -65,41 +67,89 @@ class SyncTest {
         assertNull(up.tasks.single().pendingPrompt)
     }
 
-    private class FakeGists : GitHub("t") {
-        val files = mutableMapOf<String, String>()
+    /** A GitHub account with the sync repo (once made) and any gists. */
+    private class FakeAccount(var repoPrivate: Boolean? = null) : GitHub("t") {
+        val sync = RepoRef("me", RepoSync.REPO)
+        var file: RepoFile? = null
         var writes = 0
-        override fun myGists(perPage: Int) = files.keys.map { Gist(it, files = mapOf(GistSync.FILE to GistFile())) }
-        override fun gistFile(id: String, name: String) = files[id]
-        override fun createGist(description: String, name: String, content: String): String { files["g1"] = content; return "g1" }
-        override fun updateGist(id: String, name: String, content: String) { files[id] = content; writes++ }
+        var conflicts = 0
+        val gists = mutableMapOf<String, String>()
+        val deletedGists = mutableListOf<String>()
+        override fun myLogin() = "me"
+        override fun repoVisibility(owner: String, name: String) = repoPrivate?.let { sync to it }
+        override fun createPrivateRepo(name: String, description: String): RepoRef { repoPrivate = true; return sync }
+        override fun repoFile(repo: RepoRef, path: String) = file
+        override fun putRepoFile(repo: RepoRef, path: String, content: String, sha: String?, message: String) {
+            if (conflicts > 0) { conflicts--; throw GitHubException(409, "GitHub: conflict") }
+            check(sha == file?.sha) { "stale sha" }
+            writes++
+            file = RepoFile(content, "sha$writes")
+        }
+        override fun myGists(perPage: Int) = gists.keys.map { Gist(it, files = mapOf(RepoSync.FILE to GistFile())) }
+        override fun gistFile(id: String, name: String) = gists[id]
+        override fun deleteGist(id: String) { gists.remove(id); deletedGists += id }
     }
 
-    @Test fun createsThenMergesAndOnlyWritesChanges() {
-        val gists = FakeGists()
-        val sync = GistSync(gists)
-        val first = SyncSnapshot(repos = listOf(repo))
-        val (id, _) = sync.sync(null, first)
-        assertEquals("g1", id)
-        val (_, merged) = sync.sync(null, SyncSnapshot(repos = listOf(RepoRef("me", "other"))))
+    @Test fun makesAPrivateRepoThenMergesAndOnlyWritesChanges() {
+        val account = FakeAccount()
+        val sync = RepoSync(account)
+        sync.sync(SyncSnapshot(repos = listOf(repo)))
+        assertEquals(true, account.repoPrivate)
+        val merged = sync.sync(SyncSnapshot(repos = listOf(RepoRef("me", "other")))).merged
         assertEquals(2, merged.repos.size)
-        assertEquals(1, gists.writes)
-        sync.sync(id, merged)
-        assertEquals(1, gists.writes)
+        assertEquals(2, account.writes)
+        sync.sync(merged)
+        assertEquals(2, account.writes)
+    }
+
+    @Test fun refusesAPublicSyncRepo() {
+        val account = FakeAccount(repoPrivate = false)
+        assertFailsWith<SyncRepoNotPrivate> { RepoSync(account).sync(SyncSnapshot(repos = listOf(repo))) }
+        assertNull(account.file)
+    }
+
+    @Test fun movesTheOldGistIntoTheRepoThenDeletesIt() {
+        val account = FakeAccount()
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true }
+        account.gists["g1"] = json.encodeToString(SyncSnapshot.serializer(), SyncSnapshot(repos = listOf(RepoRef("me", "fromgist"))))
+        val result = RepoSync(account).sync(SyncSnapshot(repos = listOf(repo)), checkGist = true)
+        assertTrue(result.movedGist)
+        assertEquals(listOf("me/app", "me/fromgist"), result.merged.repos.map { it.fullName })
+        assertTrue("fromgist" in account.file!!.content)
+        assertEquals(listOf("g1"), account.deletedGists)
+    }
+
+    @Test fun keepsTheGistWhenTheRepoWriteFails() {
+        val account = FakeAccount()
+        account.gists["g1"] = "{}"
+        account.conflicts = 5
+        assertFailsWith<GitHubException> { RepoSync(account).sync(SyncSnapshot(), checkGist = true) }
+        assertEquals(emptyList(), account.deletedGists)
+    }
+
+    @Test fun triesAgainAfterAnotherDeviceWroteFirst() {
+        val account = FakeAccount()
+        RepoSync(account).sync(SyncSnapshot(repos = listOf(repo)))
+        account.conflicts = 1
+        RepoSync(account).sync(SyncSnapshot(repos = listOf(RepoRef("me", "other"))))
+        assertEquals(2, account.writes)
     }
 }
 
 class SyncFirstDeviceTest {
     @Test fun aLaterDeviceWithDefaultsTakesTheFirstDevicesSettings() {
-        val files = mutableMapOf<String, String>()
-        val gists = object : GitHub("t") {
-            override fun myGists(perPage: Int) = files.keys.map { Gist(it, files = mapOf(GistSync.FILE to GistFile())) }
-            override fun gistFile(id: String, name: String) = files[id]
-            override fun createGist(description: String, name: String, content: String): String { files["g"] = content; return "g" }
-            override fun updateGist(id: String, name: String, content: String) { files[id] = content }
+        var stored: GitHub.RepoFile? = null
+        val account = object : GitHub("t") {
+            override fun myLogin() = "me"
+            override fun repoVisibility(owner: String, name: String) = RepoRef("me", name) to true
+            override fun repoFile(repo: RepoRef, path: String) = stored
+            override fun putRepoFile(repo: RepoRef, path: String, content: String, sha: String?, message: String) {
+                stored = GitHub.RepoFile(content, "s")
+            }
         }
-        val sync = GistSync(gists)
-        sync.sync(null, SyncSnapshot(settings = mapOf("theme_mode" to "s:Dark")))
-        val (_, merged) = sync.sync(null, SyncSnapshot(settings = emptyMap()))
+        val sync = RepoSync(account)
+        sync.sync(SyncSnapshot(settings = mapOf("theme_mode" to "s:Dark")))
+        val merged = sync.sync(SyncSnapshot(settings = emptyMap())).merged
         assertEquals("s:Dark", merged.settings["theme_mode"])
     }
 }

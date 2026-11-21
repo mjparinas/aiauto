@@ -266,7 +266,7 @@ internal fun CarStartRows(
     }
 }
 
-/** Sync across devices through a secret gist on your GitHub account. */
+/** Sync across devices through a private repo on your GitHub account. */
 @Composable
 internal fun SyncSection(enabled: Boolean, status: String, busy: Boolean, onEnabled: (Boolean) -> Unit, onSyncNow: () -> Unit) {
     SectionHeader("Sync")
@@ -279,7 +279,8 @@ internal fun SyncSection(enabled: Boolean, status: String, busy: Boolean, onEnab
         if (enabled) SettingRow(Icons.Rounded.Sync, BadgeHue.Teal, "Sync now", status, enabled = !busy, onClick = onSyncNow)
     }
     Note(
-        "Stored in a secret gist on your GitHub account, so your token needs Gists set to read and write. " +
+        "Stored in a private repo named cruise-control-sync on your GitHub account, which the app makes the first time. " +
+            "Your token needs Contents set to read and write on it, and Administration set to read and write to make it. " +
             "Your API key and token stay on each device. A task keeps running on the device that started it until you reply from another.",
     )
 }
