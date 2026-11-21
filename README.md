@@ -106,7 +106,8 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
 - **Model and effort.** Settings > Claude picks the model (Opus 5.5, Sonnet 5.5 or Haiku 5.5) and effort for coding
   tasks, and separately for the spoken car chat, which defaults to low effort so answers come back quickly.
 - **Allow web search.** Lets Claude search the web and read pages while it works. Its workspace then runs with open
-  internet access instead of only package registries.
+  internet access instead of only package registries. It applies to coding tasks only; the car chat doesn't search
+  the web.
 - **Standing rules.** Tick common rules, like always adding tests or leaving CI files alone, and add your own, one
   per line. They're added to Claude's instructions for every task.
 - Changing any of these makes a new agent for the next task. Tasks already running keep the agent they started with.
