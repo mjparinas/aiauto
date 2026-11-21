@@ -118,13 +118,16 @@ fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> 
                 onValueChange = { text = it },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(placeholder) },
-                shape = MaterialTheme.shapes.large,
+                // A pill on the card colour with no outline until focused, like Tuned's search box.
+                shape = RoundedCornerShape(28.dp),
                 maxLines = 5,
                 enabled = enabled,
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    disabledContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent,
                 ),
                 trailingIcon = {
                     IconButton(enabled = enabled, onClick = {

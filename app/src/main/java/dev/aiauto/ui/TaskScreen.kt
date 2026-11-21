@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Unarchive
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +33,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import dev.aiauto.core.Checks
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,7 +47,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.rounded.StopCircle
@@ -133,32 +138,10 @@ fun TaskScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             task.prUrl?.let { url ->
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AssistChip(
-                            onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
-                            label = { Text("PR #${task.prNumber}") },
-                            trailingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
-                        )
-                        when (task.prState) {
-                            PrState.Merged -> Text("Merged", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            PrState.Closed -> Text("Closed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            else -> {
-                                ChecksLabel(task.checks, Modifier.weight(1f))
-                                TextButton(onClick = { confirmMerge = true }) { Text("Merge") }
-                            }
-                        }
-                    }
-                }
+                item { PrCard(task, onOpen = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onMerge = { confirmMerge = true }) }
             }
             if (task.costUsd > 0) {
-                item {
-                    Text(
-                        "Cost so far: ${SpokenStatus.money(task.costUsd)}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                item { SectionHeader("Cost so far · ${SpokenStatus.money(task.costUsd)}", inset = 16.dp) }
             }
             items(task.messages, key = { it.id }) { Message(it) }
         }
@@ -172,6 +155,45 @@ private fun chatText(task: Task): String = buildString {
     task.messages.forEach { append("\n\n${it.speaker}: ${it.text}") }
 }
 
+/** The task's pull request on its own card: its checks, and Merge while it is open. Tapping the card opens it on GitHub. */
+@Composable
+private fun PrCard(task: Task, onOpen: () -> Unit, onMerge: () -> Unit) {
+    val hue = when {
+        task.prState == PrState.Merged -> BadgeHue.Violet
+        task.prState == PrState.Closed -> BadgeHue.Blue
+        task.checks?.state == Checks.Passing -> BadgeHue.Green
+        task.checks?.state == Checks.Failing -> BadgeHue.Red
+        task.checks?.state == Checks.Pending -> BadgeHue.Amber
+        else -> BadgeHue.Blue
+    }
+    RoundCard(onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Rounded.Code, hue)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pull request #${task.prNumber}", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.AutoMirrored.Rounded.OpenInNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                when (task.prState) {
+                    PrState.Merged -> Text("Merged", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    PrState.Closed -> Text("Closed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> ChecksLabel(task.checks)
+                }
+            }
+            if (task.prState != PrState.Merged && task.prState != PrState.Closed) {
+                TextButton(onClick = onMerge) { Text("Merge") }
+            }
+        }
+    }
+}
+
 /** Says why the task stopped and offers to pick it back up. */
 @Composable
 private fun StoppedBanner(task: Task, onRetry: () -> Unit) {
@@ -179,8 +201,8 @@ private fun StoppedBanner(task: Task, onRetry: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clip(MaterialTheme.shapes.medium)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(MaterialTheme.colorScheme.errorContainer)
             .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -200,26 +222,47 @@ private fun StoppedBanner(task: Task, onRetry: () -> Unit) {
 @Composable
 private fun Message(message: TaskMessage) {
     when (message.speaker) {
+        // Your messages sit on the right in an accent bubble with one tighter corner, as a chat app's do.
         Speaker.You -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             Text(
                 message.text,
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier
-                    .widthIn(max = 300.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(start = 48.dp)
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
+        // Claude's replies read as a card on the page, left aligned.
         Speaker.Claude -> Text(
             message.text,
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(end = 24.dp),
+            modifier = Modifier
+                .padding(end = 24.dp)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         )
-        Speaker.Status -> Text(
-            message.text,
-            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Progress notes are quiet: a small icon and a line of small print.
+        Speaker.Status -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                Icons.Rounded.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp).size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                message.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
