@@ -9,6 +9,7 @@ import android.speech.tts.UtteranceProgressListener
 import androidx.car.app.connection.CarConnection
 import androidx.lifecycle.Observer
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -29,7 +30,8 @@ class Speaker(context: Context) {
         .build()
     private val queued = AtomicInteger(0)
     private val utteranceIds = AtomicInteger(0)
-    private val pending = mutableListOf<String>()
+    private val pending = mutableListOf<Pair<String, (() -> Unit)?>>()
+    private val callbacks = ConcurrentHashMap<String, () -> Unit>()
     private var ready = false
     private val tts = TextToSpeech(context.applicationContext) { status -> onInit(status) }
 
@@ -46,42 +48,47 @@ class Speaker(context: Context) {
         tts.setAudioAttributes(attributes)
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) = finished()
+            override fun onDone(utteranceId: String?) = finished(utteranceId)
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) = finished()
+            override fun onError(utteranceId: String?) = finished(utteranceId)
         })
         ready = true
-        pending.forEach(::say)
+        pending.forEach { (text, onDone) -> say(text, onDone) }
         pending.clear()
     }
 
+    /** Queues [text]; [onDone] runs on a background thread once it has been read out, unless [stop] cancels it. */
     @Synchronized
-    fun speak(text: String) {
+    fun speak(text: String, onDone: (() -> Unit)? = null) {
         if (text.isBlank()) return
-        if (ready) say(text)
-        else if (pending.size < MAX_PENDING) pending.add(text)
+        if (ready) say(text, onDone)
+        else if (pending.size < MAX_PENDING) pending.add(text to onDone)
     }
 
     @Synchronized
     fun stop() {
         pending.clear()
+        callbacks.clear()
         if (ready) tts.stop()
         queued.set(0)
         audio.abandonAudioFocusRequest(focus)
     }
 
-    private fun say(text: String) {
+    private fun say(text: String, onDone: (() -> Unit)?) {
         if (queued.getAndIncrement() == 0) audio.requestAudioFocus(focus)
-        val result = runCatching { tts.speak(text, TextToSpeech.QUEUE_ADD, null, "u" + utteranceIds.incrementAndGet()) }
+        val id = "u" + utteranceIds.incrementAndGet()
+        onDone?.let { callbacks[id] = it }
+        val result = runCatching { tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) }
         // If the engine refused it, no onDone will come, so give the music its volume back now.
-        if (result.getOrDefault(TextToSpeech.ERROR) == TextToSpeech.ERROR) finished()
+        if (result.getOrDefault(TextToSpeech.ERROR) == TextToSpeech.ERROR) finished(id)
     }
 
-    private fun finished() {
+    private fun finished(utteranceId: String?) {
         if (queued.decrementAndGet() <= 0) {
             queued.set(0)
             audio.abandonAudioFocusRequest(focus)
         }
+        utteranceId?.let { callbacks.remove(it)?.invoke() }
     }
 
     private companion object {
