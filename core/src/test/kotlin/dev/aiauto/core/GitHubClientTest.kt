@@ -326,4 +326,10 @@ class GitHubClientTest {
         assertEquals("""{"complete": true}""", github.gistFile("g1", "sync.json"))
         assertNull(github.gistFile("g1", "other.json"))
     }
+
+    @Test fun neverSendsTheTokenToAnotherHostForAGistFile() {
+        on("GET", "/gists/g1", 200, """{"id": "g1", "files": {"sync.json": {"content": "{", "truncated": true, "raw_url": "https://example.com/steal"}}}""")
+        assertNull(github.gistFile("g1", "sync.json"))
+        assertEquals(listOf("/gists/g1"), sent.map { it.path })
+    }
 }

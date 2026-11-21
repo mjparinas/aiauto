@@ -3,6 +3,7 @@ package dev.aiauto.core
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -295,9 +296,9 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
         val gist = json.decodeFromString<Gist>(get("/gists/$id"))
         val file = gist.files[name] ?: return null
         if (!file.truncated) return file.content
-        return file.rawUrl?.let { url ->
-            http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { it.body?.string() }
-        }
+        // The token goes only to GitHub's own gist host, never to wherever a raw URL happens to point.
+        val url = file.rawUrl?.toHttpUrlOrNull()?.takeIf { it.isHttps && it.host == GIST_RAW_HOST } ?: return null
+        return http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { it.body?.string() }
     }
 
     /** Makes a secret gist holding one file. Returns its id. */
@@ -342,5 +343,6 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
 
     private companion object {
         val OK_CONCLUSIONS = setOf("success", "neutral", "skipped")
+        const val GIST_RAW_HOST = "gist.githubusercontent.com"
     }
 }
