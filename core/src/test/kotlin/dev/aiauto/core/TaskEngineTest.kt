@@ -60,7 +60,7 @@ class TaskEngineTest {
             onUpdate: (AgentUpdate) -> Unit,
         ): Boolean {
             when (val step = followSteps.removeFirstOrNull()) {
-                is Exception -> throw step
+                is Throwable -> throw step
                 is List<*> -> { onConnected(); step.forEach { onUpdate(it as AgentUpdate) } }
                 else -> { onConnected(); onUpdate(AgentUpdate.Said("All done.")); onUpdate(AgentUpdate.TurnDone) }
             }
@@ -130,6 +130,58 @@ class TaskEngineTest {
         assertEquals(TaskStatus.Failed, stopped.status)
         assertTrue(stopped.interrupted)
         assertNull(stopped.pendingPrompt)
+    }
+
+    @Test fun keepsRetryingACutOffTaskOnItsOwnAndAnnouncesTheDropOnce() {
+        var now = 1_000_000L
+        val engine = TaskEngine(
+            store = store, config = config, scope = CoroutineScope(SupervisorJob()), clock = { now },
+            claudeFactory = { claude }, githubFactory = { throw GitHubException(404, "no branch") },
+            onMessage = { _, m -> spoken += m.text }, sleep = {}, dispatcher = Dispatchers.Unconfined,
+        )
+        repeat(6) { claude.sendFailures += dropped() }
+        val task = engine.start(repo, "rename the screen")
+        assertTrue(store.get(task.id)!!.interrupted)
+        assertTrue(engine.isReconnecting())
+
+        // Too soon: nothing happens.
+        engine.resumeInterrupted()
+        assertEquals(3, claude.sendFailures.size)
+
+        now += 31_000
+        engine.resumeInterrupted()
+        assertTrue(store.get(task.id)!!.interrupted)
+        assertEquals(0, claude.sendFailures.size)
+        assertEquals(1, spoken.count { "reconnect" in it })
+
+        now += 31_000
+        engine.resumeInterrupted()
+        val done = store.get(task.id)!!
+        assertEquals(TaskStatus.Done, done.status)
+        assertNull(done.interruptedSinceMillis)
+        assertFalse(engine.isReconnecting())
+    }
+
+    @Test fun stopsRetryingOnItsOwnAfterAWhile() {
+        var now = 1_000_000L
+        val engine = TaskEngine(
+            store = store, config = config, scope = CoroutineScope(SupervisorJob()), clock = { now },
+            claudeFactory = { claude }, githubFactory = { throw GitHubException(404, "no branch") },
+            sleep = {}, dispatcher = Dispatchers.Unconfined,
+        )
+        repeat(3) { claude.sendFailures += dropped() }
+        val task = engine.start(repo, "go")
+        now += 3 * 60 * 60 * 1000L
+        assertFalse(engine.isReconnecting())
+        engine.resumeInterrupted()
+        assertTrue(store.get(task.id)!!.interrupted)
+        assertEquals(0, claude.sent.size)
+    }
+
+    @Test fun anUnexpectedErrorFailsTheTaskInsteadOfLeavingItStuck() {
+        claude.followSteps += StackOverflowError()
+        val task = engine().start(repo, "go")
+        assertEquals(TaskStatus.Failed, store.get(task.id)!!.status)
     }
 
     @Test fun badKeyFailsWithAClearMessage() {

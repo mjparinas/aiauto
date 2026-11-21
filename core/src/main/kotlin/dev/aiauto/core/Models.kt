@@ -76,6 +76,8 @@ data class Task(
     val pendingPrompt: String? = null,
     /** Stopped because the connection dropped, not because of Claude. Resumes when the network is back. */
     val interrupted: Boolean = false,
+    /** When the connection first dropped in this run of trouble. Cleared once a turn finishes or the task stops for good. */
+    val interruptedSinceMillis: Long? = null,
     /** Live pull request state, refreshed from GitHub. Null until a pull request exists. */
     val prState: PrState? = null,
     val checks: ChecksSummary? = null,

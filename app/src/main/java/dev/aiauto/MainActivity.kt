@@ -104,7 +104,11 @@ class MainActivity : ComponentActivity() {
                         onRefresh = { g.projects.refreshAll(repos) },
                         onMerge = { repo, number ->
                             projectMessage = "Merging #$number…"
-                            scope.launch { projectMessage = withContext(Dispatchers.IO) { g.mergePull(repo, number) } }
+                            scope.launch {
+                                projectMessage = withContext(Dispatchers.IO) {
+                                    runCatching { g.mergePull(repo, number) }.getOrElse { "Couldn't merge pull request $number. ${Failures.describe(it)}" }
+                                }
+                            }
                         },
                     )
                     Screen.NewTask -> NewTaskScreen(
@@ -129,7 +133,7 @@ class MainActivity : ComponentActivity() {
                                 g.notifier.clear(task.id)
                                 screen = Screen.Home
                             },
-                            onMerge = { scope.launch(Dispatchers.IO) { g.engine.mergeNow(task.id) } },
+                            onMerge = { scope.launch(Dispatchers.IO) { runCatching { g.engine.mergeNow(task.id) } } },
                             onRetry = {
                                 g.engine.retry(task.id)
                                 TaskService.ensureRunning(this)

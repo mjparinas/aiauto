@@ -103,16 +103,25 @@ class Graph(context: Context) {
     /** Opens the "Talk to Claude" conversation each time the phone connects to the car, and removes it after. */
     fun watchCar(context: Context) {
         var connected = false
-        CarConnection(context.applicationContext).type.observeForever { type ->
-            val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
-            if (now && !connected && isConfigured) notifier.startChat()
-            if (!now && connected) notifier.clearChat()
-            // Make sure the foreground service holds running tasks before and after the car goes away,
-            // so work started from the car keeps going on the phone until it's done.
-            if (now != connected && tasks.all().any { engine.isRunning(it.id) }) TaskService.ensureRunning(context)
-            connected = now
-        }
+        runCatching {
+            CarConnection(context.applicationContext).type.observeForever { type ->
+                val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
+                try {
+                    if (now && !connected && isConfigured) notifier.startChat()
+                    if (!now && connected) notifier.clearChat()
+                    // Make sure the foreground service holds running tasks before and after the car goes away,
+                    // so work started from the car keeps going on the phone until it's done.
+                    if (now != connected && hasActiveWork()) TaskService.ensureRunning(context)
+                } catch (e: Throwable) {
+                    Log.w("AiAuto", "Car connection change failed", e)
+                }
+                connected = now
+            }
+        }.onFailure { Log.w("AiAuto", "Couldn't watch the car connection", it) }
     }
+
+    /** True while a task is running or waiting to reconnect, so the foreground service should be up. */
+    fun hasActiveWork(): Boolean = tasks.all().any { engine.isRunning(it.id) } || engine.isReconnecting()
 
     /** Resumes tasks that stopped because the connection dropped, as soon as the phone is back online. */
     fun watchNetwork(context: Context) {
@@ -120,13 +129,16 @@ class Graph(context: Context) {
         runCatching {
             connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+                    try {
                         engine.onNetworkAvailable()
-                        if (tasks.all().any { engine.isRunning(it.id) }) TaskService.ensureRunning(context)
+                        if (hasActiveWork()) TaskService.ensureRunning(context)
+                    } catch (e: Throwable) {
+                        Log.w("AiAuto", "Couldn't resume tasks after the network came back", e)
                     }
                 }
             })
-        }
+        }.onFailure { Log.w("AiAuto", "Couldn't watch the network", it) }
     }
 
     val isConfigured: Boolean get() = secrets.anthropicKey != null && secrets.githubToken != null

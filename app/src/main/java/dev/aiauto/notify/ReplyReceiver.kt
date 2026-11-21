@@ -3,6 +3,7 @@ package dev.aiauto.notify
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.RemoteInput
 import dev.aiauto.TaskService
 import dev.aiauto.graph
@@ -12,6 +13,15 @@ import kotlinx.coroutines.launch
 /** Handles voice replies and "mark as read" from the phone or the car. */
 class ReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // A reply that fails to send must not crash the app while someone is driving.
+        try {
+            handle(context, intent)
+        } catch (e: Throwable) {
+            Log.e("AiAuto", "Couldn't handle a reply", e)
+        }
+    }
+
+    private fun handle(context: Context, intent: Intent) {
         val target = intent.getStringExtra(EXTRA_TARGET) ?: return
         val g = context.graph
         if (intent.action == ACTION_READ) {
@@ -31,6 +41,9 @@ class ReplyReceiver : BroadcastReceiver() {
                     val answer = g.assistant.ask(text)
                     g.notifier.postChat(fromClaude = answer)
                     if (g.speaker.inCar) g.speaker.speak(answer)
+                } catch (e: Throwable) {
+                    Log.e("AiAuto", "Couldn't answer a chat reply", e)
+                    runCatching { g.notifier.postChat(fromClaude = "Sorry, that didn't go through. Try again.") }
                 } finally {
                     pending.finish()
                 }

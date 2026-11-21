@@ -46,12 +46,12 @@ class Assistant(
     fun ask(spoken: String): String {
         val key = apiKey() ?: return "Add your Anthropic API key in the app on your phone first."
         if (!canSpend()) return "You've reached today's spending limit, so I can't answer right now. You can raise it in Settings on your phone."
-        val claude = clientFor(key)
         val start = history.size
-        history += MessageParam.ofUser(spoken)
         return try {
+            val claude = clientFor(key)
+            history += MessageParam.ofUser(spoken)
             converse(claude)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // Drop the half-finished turn so the next question starts from a clean history.
             while (history.size > start) history.removeAt(history.size - 1)
             Failures.describe(e)
