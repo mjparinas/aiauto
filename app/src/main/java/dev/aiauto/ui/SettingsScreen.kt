@@ -98,6 +98,8 @@ data class SettingsState(
     val listenOnOpen: Boolean = true,
     val briefing: Boolean = true,
     val rememberChats: Boolean = true,
+    val syncEnabled: Boolean = false,
+    val syncStatus: String = "",
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -136,6 +138,8 @@ fun SettingsScreen(
     onBriefing: (Boolean) -> Unit = {},
     onRememberChats: (Boolean) -> Unit = {},
     onForgetChats: () -> Unit = {},
+    onSyncEnabled: (Boolean) -> Unit = {},
+    onSyncNow: () -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -253,6 +257,8 @@ fun SettingsScreen(
             }
             Note("Claude stops when today's total reaches the limit, counted at list price from what each session reports.")
 
+            SyncSection(state.syncEnabled, state.syncStatus, state.busy, onSyncEnabled, onSyncNow)
+
             SectionHeader("About")
             SettingsCard {
                 SettingRow(Icons.Rounded.Info, BadgeHue.Blue, "Cruise Control", "Version ${state.version}")
@@ -276,7 +282,7 @@ fun SettingsScreen(
         ) { onSaveKeys(it, "") }
         SettingsDialog.GithubToken -> TextDialog(
             title = "GitHub token",
-            help = "A fine-grained token with Contents and Pull requests set to read and write, and Checks and Commit statuses set to read, on your repos.",
+            help = "A fine-grained token with Contents and Pull requests set to read and write, and Checks and Commit statuses set to read, on your repos. For sync across devices, also set Gists to read and write.",
             label = "Token",
             secret = true,
             onDismiss = { dialog = null },

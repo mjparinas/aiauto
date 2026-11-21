@@ -14,7 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
@@ -262,4 +264,22 @@ internal fun CarStartRows(
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** Sync across devices through a secret gist on your GitHub account. */
+@Composable
+internal fun SyncSection(enabled: Boolean, status: String, busy: Boolean, onEnabled: (Boolean) -> Unit, onSyncNow: () -> Unit) {
+    SectionHeader("Sync")
+    SettingsCard {
+        SwitchRow(
+            Icons.Rounded.CloudSync, BadgeHue.Blue, "Sync across devices",
+            "Keeps repos, tasks, settings and the car chat's memory the same on every phone or tablet signed in to the same GitHub account.",
+            enabled, onEnabled,
+        )
+        if (enabled) SettingRow(Icons.Rounded.Sync, BadgeHue.Teal, "Sync now", status, enabled = !busy, onClick = onSyncNow)
+    }
+    Note(
+        "Stored in a secret gist on your GitHub account, so your token needs Gists set to read and write. " +
+            "Your API key and token stay on each device. A task keeps running on the device that started it until you reply from another.",
+    )
 }

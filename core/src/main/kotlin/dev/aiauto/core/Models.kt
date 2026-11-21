@@ -126,6 +126,11 @@ data class Task(
     val conflicts: Boolean = false,
     /** Fixes the app asked Claude for on its own since the driver last spoke, so it can't loop forever. */
     val autoFixes: Int = 0,
+    /**
+     * The device that runs this task, when tasks sync between devices. Only that device follows the session and
+     * watches the pull request; another device takes it over when you reply or retry from it. Null means this device.
+     */
+    val device: String? = null,
 ) {
     /** A pull request exists and hasn't been merged or closed yet. */
     val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open

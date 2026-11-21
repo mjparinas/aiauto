@@ -279,6 +279,46 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
         return !response.contains("\"errors\"")
     }
 
+    // ---- Gists, for syncing between devices ----------------------------------------------------------------
+
+    @Serializable
+    data class GistFile(val content: String? = null, val truncated: Boolean = false, @SerialName("raw_url") val rawUrl: String? = null)
+
+    @Serializable
+    data class Gist(val id: String, val description: String? = null, val files: Map<String, GistFile> = emptyMap())
+
+    /** The token owner's gists, newest first. Their file contents aren't included. */
+    open fun myGists(perPage: Int = 100): List<Gist> = json.decodeFromString(get("/gists?per_page=$perPage"))
+
+    /** One gist with its files' contents. Large files come back truncated, so those are read from their raw URL. */
+    open fun gistFile(id: String, name: String): String? {
+        val gist = json.decodeFromString<Gist>(get("/gists/$id"))
+        val file = gist.files[name] ?: return null
+        if (!file.truncated) return file.content
+        return file.rawUrl?.let { url ->
+            http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { it.body?.string() }
+        }
+    }
+
+    /** Makes a secret gist holding one file. Returns its id. */
+    open fun createGist(description: String, name: String, content: String): String {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("description", kotlinx.serialization.json.JsonPrimitive(description))
+            put("public", kotlinx.serialization.json.JsonPrimitive(false))
+            put("files", gistFiles(name, content))
+        }.toString()
+        return json.decodeFromString<Gist>(send("POST", "/gists", body)).id
+    }
+
+    open fun updateGist(id: String, name: String, content: String) {
+        val body = kotlinx.serialization.json.buildJsonObject { put("files", gistFiles(name, content)) }.toString()
+        send("PATCH", "/gists/$id", body)
+    }
+
+    private fun gistFiles(name: String, content: String) = kotlinx.serialization.json.buildJsonObject {
+        put(name, kotlinx.serialization.json.buildJsonObject { put("content", kotlinx.serialization.json.JsonPrimitive(content)) })
+    }
+
     private fun get(path: String) = send("GET", path, null)
 
     private fun send(method: String, path: String, body: String?): String {

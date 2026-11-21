@@ -27,6 +27,7 @@ class AiAutoApp : Application() {
         safely("watch network") { graph.watchNetwork(this) }
         safely("watch car") { graph.watchCar(this) }
         safely("watch widget") { graph.watchWidget(this) }
+        safely("start sync") { graph.sync.start() }
         safely("refresh pull requests") { graph.engine.refreshPullRequests() }
         safely("start service") { if (graph.hasActiveWork() || graph.engine.isWatchingPullRequests()) TaskService.ensureRunning(this) }
         // Fires at startup and each time the app comes back from the background.
