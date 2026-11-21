@@ -135,10 +135,19 @@ data class Task(
 /** Tasks waiting on the user's reply come first, so they're never pushed off a short list. Otherwise keeps the order. */
 fun List<Task>.needsYouFirst(): List<Task> = sortedBy { it.status != TaskStatus.NeedsInput }
 
-/** IDs of the agent and environment created once per API key. */
+/**
+ * IDs of the agent and environments created for the current API key. [profile] is what the agent was made with;
+ * null for setups saved before the app had agent settings. [webEnvironmentId] is the environment with open internet
+ * access, made the first time web search is switched on.
+ */
 @Serializable
 data class AgentSetup(
     val agentId: String,
     val agentVersion: Int,
     val environmentId: String,
-)
+    val profile: AgentProfile? = null,
+    val webEnvironmentId: String? = null,
+) {
+    /** The environment a new session should run in. */
+    val sessionEnvironmentId: String get() = if (profile?.webSearch == true) webEnvironmentId ?: environmentId else environmentId
+}

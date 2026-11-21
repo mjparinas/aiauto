@@ -35,14 +35,14 @@ class VoiceCommandTest {
     private class Config : EngineConfig {
         override fun anthropicKey() = "key"
         override fun githubToken() = "token"
-        override fun agentSetup() = AgentSetup("agent", 1, "env")
+        override fun agentSetup() = AgentSetup("agent", 1, "env", AgentProfile())
         override fun saveAgentSetup(setup: AgentSetup) {}
     }
 
     private class FakeClaude : AgentClient {
         val sent = mutableListOf<String>()
         val interrupted = mutableListOf<String>()
-        override fun createSetup() = AgentSetup("agent", 1, "env")
+        override fun createSetup(profile: AgentProfile, existing: AgentSetup?) = AgentSetup("agent", 1, "env", AgentProfile())
         override fun createSession(setup: AgentSetup, task: Task, githubToken: String) = "session-${task.id}"
         override fun sendPrompt(sessionId: String, prompt: String) { sent += prompt }
         override fun follow(

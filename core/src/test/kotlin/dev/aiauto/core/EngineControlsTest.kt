@@ -30,7 +30,7 @@ class EngineControlsTest {
         var releaseSince: Long? = null
         override fun anthropicKey() = "key"
         override fun githubToken() = "token"
-        override fun agentSetup() = AgentSetup("agent", 1, "env")
+        override fun agentSetup() = AgentSetup("agent", 1, "env", AgentProfile())
         override fun saveAgentSetup(setup: AgentSetup) {}
         override fun dailyLimitUsd() = limit
         override fun spentTodayUsd() = spent
@@ -50,7 +50,7 @@ class EngineControlsTest {
         val budgets = mutableListOf<Double>()
         var finalCost: Double? = null
 
-        override fun createSetup() = AgentSetup("agent", 1, "env")
+        override fun createSetup(profile: AgentProfile, existing: AgentSetup?) = AgentSetup("agent", 1, "env", AgentProfile())
         override fun createSession(setup: AgentSetup, task: Task, githubToken: String) = "session-${task.id}"
         var onSend: (String) -> Unit = {}
         override fun sendPrompt(sessionId: String, prompt: String) { sent += prompt; onSend(prompt) }

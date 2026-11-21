@@ -6,11 +6,12 @@ import com.anthropic.models.beta.agents.AgentCreateParams
 import com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolset20260401Params
 import com.anthropic.models.beta.agents.BetaManagedAgentsAgentToolsetDefaultConfigParams
 import com.anthropic.models.beta.agents.BetaManagedAgentsAutoPolicy
-import com.anthropic.models.beta.agents.BetaManagedAgentsModel
+import com.anthropic.models.beta.agents.BetaManagedAgentsModelConfigParams
 import com.anthropic.models.beta.agents.BetaManagedAgentsWebFetchToolConfigParams
 import com.anthropic.models.beta.agents.BetaManagedAgentsWebSearchToolConfigParams
 import com.anthropic.models.beta.environments.BetaCloudConfigParams
 import com.anthropic.models.beta.environments.BetaLimitedNetworkParams
+import com.anthropic.models.beta.environments.BetaUnrestrictedNetwork
 import com.anthropic.models.beta.environments.EnvironmentCreateParams
 import com.anthropic.models.beta.sessions.BetaManagedAgentsAgentParams
 import com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResourceParams
@@ -55,7 +56,11 @@ sealed interface AgentUpdate {
 
 /** What [TaskEngine] needs from Claude. [ClaudeAgents] is the real one; tests use a fake. */
 interface AgentClient : AutoCloseable {
-    fun createSetup(): AgentSetup
+    /**
+     * Makes an agent with [profile]. Reuses the environments in [existing] when there are any, so changing a setting
+     * only makes a new agent.
+     */
+    fun createSetup(profile: AgentProfile = AgentProfile(), existing: AgentSetup? = null): AgentSetup
     fun createSession(setup: AgentSetup, task: Task, githubToken: String): String
     fun sendPrompt(sessionId: String, prompt: String)
     fun follow(
@@ -98,28 +103,20 @@ class ClaudeAgents(apiKey: String) : AgentClient {
         )
         .build()
 
-    /** Creates the agent and environment. Call once per API key and store the result. */
-    override fun createSetup(): AgentSetup {
-        val environment = client.beta().environments().create(
-            EnvironmentCreateParams.builder()
-                .name("aiauto-env")
-                .config(
-                    BetaCloudConfigParams.builder()
-                        .networking(
-                            BetaLimitedNetworkParams.builder()
-                                .allowPackageManagers(true)
-                                .allowMcpServers(false)
-                                .build(),
-                        )
-                        .build(),
-                )
-                .build(),
-        )
+    /** Creates the agent, and the environments it needs that [existing] doesn't have yet. Store the result. */
+    override fun createSetup(profile: AgentProfile, existing: AgentSetup?): AgentSetup {
+        val environmentId = existing?.environmentId ?: createEnvironment(web = false)
+        val webEnvironmentId = existing?.webEnvironmentId ?: if (profile.webSearch) createEnvironment(web = true) else null
         val agent = client.beta().agents().create(
             AgentCreateParams.builder()
                 .name("Cruise Control coding agent")
-                .model(BetaManagedAgentsModel.of(MODEL))
-                .system(SYSTEM_PROMPT)
+                .model(
+                    BetaManagedAgentsModelConfigParams.builder()
+                        .id(profile.modelChoice.id)
+                        .effort(effortLevel(profile.effortChoice))
+                        .build(),
+                )
+                .system(profile.systemPrompt(SYSTEM_PROMPT))
                 .addTool(
                     BetaManagedAgentsAgentToolset20260401Params.builder()
                         .defaultConfig(
@@ -127,13 +124,45 @@ class ClaudeAgents(apiKey: String) : AgentClient {
                                 .permissionPolicy(BetaManagedAgentsAutoPolicy.builder().build())
                                 .build(),
                         )
-                        .addConfig(BetaManagedAgentsWebFetchToolConfigParams.builder().enabled(false).build())
-                        .addConfig(BetaManagedAgentsWebSearchToolConfigParams.builder().enabled(false).build())
+                        .addConfig(BetaManagedAgentsWebFetchToolConfigParams.builder().enabled(profile.webSearch).build())
+                        .addConfig(BetaManagedAgentsWebSearchToolConfigParams.builder().enabled(profile.webSearch).build())
                         .build(),
                 )
                 .build(),
         )
-        return AgentSetup(agent.id(), agent.version(), environment.id())
+        return AgentSetup(agent.id(), agent.version(), environmentId, profile, webEnvironmentId)
+    }
+
+    /**
+     * The normal environment only reaches package registries. Web search needs open internet access, because with
+     * limited networking the web tools can only reach the hosts the environment allows.
+     */
+    private fun createEnvironment(web: Boolean): String {
+        val config = BetaCloudConfigParams.builder()
+        if (web) {
+            config.networking(BetaUnrestrictedNetwork.builder().build())
+        } else {
+            config.networking(
+                BetaLimitedNetworkParams.builder()
+                    .allowPackageManagers(true)
+                    .allowMcpServers(false)
+                    .build(),
+            )
+        }
+        return client.beta().environments().create(
+            EnvironmentCreateParams.builder()
+                .name(if (web) "aiauto-env-web" else "aiauto-env")
+                .config(config.build())
+                .build(),
+        ).id()
+    }
+
+    private fun effortLevel(effort: EffortChoice) = when (effort) {
+        EffortChoice.Low -> BetaManagedAgentsModelConfigParams.Effort.BetaManagedAgentsEffortLevel.LOW
+        EffortChoice.Medium -> BetaManagedAgentsModelConfigParams.Effort.BetaManagedAgentsEffortLevel.MEDIUM
+        EffortChoice.High -> BetaManagedAgentsModelConfigParams.Effort.BetaManagedAgentsEffortLevel.HIGH
+        EffortChoice.XHigh -> BetaManagedAgentsModelConfigParams.Effort.BetaManagedAgentsEffortLevel.XHIGH
+        EffortChoice.Max -> BetaManagedAgentsModelConfigParams.Effort.BetaManagedAgentsEffortLevel.MAX
     }
 
     /** Creates a session for [task] with the repo cloned at [REPO_PATH]. Returns the session id. */
@@ -146,7 +175,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
                         .version(setup.agentVersion)
                         .build(),
                 )
-                .environmentId(setup.environmentId)
+                .environmentId(setup.sessionEnvironmentId)
                 .title("${task.repo.fullName}: ${task.title}")
                 .addResource(
                     BetaManagedAgentsGitHubRepositoryResourceParams.builder()
@@ -353,7 +382,6 @@ class ClaudeAgents(apiKey: String) : AgentClient {
     override fun close() = client.close()
 
     companion object {
-        const val MODEL = "claude-opus-5-5"
         const val REPO_PATH = "/workspace/repo"
         private val ASK = Optional.of(BetaManagedAgentsAgentEvaluatedPermission.ASK)
 

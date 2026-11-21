@@ -354,7 +354,7 @@ class TaskEngine(
             } catch (e: Exception) {
                 // The saved agent or environment is gone (deleted, or the key now points at another workspace).
                 if (!Failures.isMissing(e)) throw e
-                claude.createSession(claude.createSetup().also(config::saveAgentSetup), task, token)
+                claude.createSession(claude.createSetup(config.agentProfile()).also(config::saveAgentSetup), task, token)
             }
             val request = task.messages.filter { it.speaker == Speaker.You }.joinToString("\n") { it.text }
             journal.update(taskId) { it.copy(sessionId = sessionId, pendingPrompt = ClaudeAgents.firstPrompt(it, request)) }
@@ -367,8 +367,13 @@ class TaskEngine(
         journal.update(taskId) { if (it.pendingPrompt == prompt) it.copy(pendingPrompt = null) else it }
     }
 
-    private fun agentSetup(claude: AgentClient): AgentSetup =
-        config.agentSetup() ?: claude.createSetup().also(config::saveAgentSetup)
+    /** The saved agent, or a new one when there's none yet or its settings no longer match what Settings asks for. */
+    private fun agentSetup(claude: AgentClient): AgentSetup {
+        val saved = config.agentSetup()
+        val profile = config.agentProfile()
+        if (saved != null && saved.profile == profile) return saved
+        return claude.createSetup(profile, saved).also(config::saveAgentSetup)
+    }
 
     /** Runs [block], retrying short outages with backoff before giving up. */
     private suspend fun withRetries(block: () -> Unit) {
