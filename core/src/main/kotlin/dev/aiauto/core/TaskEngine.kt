@@ -90,6 +90,7 @@ class TaskEngine(
     fun prompt(taskId: String, text: String) {
         val task = store.get(taskId) ?: return
         append(taskId, Speaker.You, text)
+        if (task.archived) update(taskId) { it.copy(archived = false) }
         // Without a session the prompt joins the first message; otherwise it queues behind any unsent one.
         if (task.sessionId != null) {
             update(taskId) { it.copy(pendingPrompt = listOfNotNull(it.pendingPrompt, text).joinToString("\n\n")) }
@@ -171,9 +172,20 @@ class TaskEngine(
         }
     }
 
-    /** Clears every finished task (stopped, failed, or done with no open pull request). Returns how many. */
+    /** Moves a task to the archive, keeping its chat. A task that's working is stopped first. */
+    fun archive(taskId: String) {
+        stop(taskId)
+        update(taskId) { it.copy(archived = true) }
+    }
+
+    /** Brings an archived task back to the main list. */
+    fun unarchive(taskId: String) {
+        update(taskId) { it.copy(archived = false) }
+    }
+
+    /** Clears every finished task (stopped, failed, or done with no open pull request) that isn't archived. Returns how many. */
     fun clearFinished(): Int {
-        val finished = store.all().filter { it.isFinished && !isRunning(it.id) }
+        val finished = store.all().filter { it.isFinished && !it.archived && !isRunning(it.id) }
         finished.forEach { clear(it.id) }
         return finished.size
     }

@@ -165,6 +165,24 @@ class EngineControlsTest {
         assertTrue(store.get("t2") != null)
     }
 
+    @Test fun archiveStopsAndKeepsTheTaskOutOfClearFinished() {
+        val engine = engine()
+        store.put(Task("t", repo, "x", "b", sessionId = "s", status = TaskStatus.Working, createdMillis = 0, updatedMillis = 0))
+        engine.archive("t")
+        val archived = store.get("t")!!
+        assertTrue(archived.archived)
+        assertEquals(TaskStatus.Stopped, archived.status)
+        assertEquals(listOf("s"), claude.interrupted)
+        assertEquals(0, engine.clearFinished())
+        assertTrue(store.get("t") != null)
+
+        engine.unarchive("t")
+        assertFalse(store.get("t")!!.archived)
+        engine.archive("t")
+        engine.prompt("t", "one more thing")
+        assertFalse(store.get("t")!!.archived)
+    }
+
     @Test fun stopDoesNothingToAFinishedTask() {
         val engine = engine()
         store.put(Task("t", repo, "x", "b", sessionId = "s", status = TaskStatus.Done, createdMillis = 0, updatedMillis = 0))
