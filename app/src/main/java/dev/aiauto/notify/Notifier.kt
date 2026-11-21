@@ -46,6 +46,20 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         if (settings.readAloudInCar && speaker.inCar) speaker.speak(message.text)
     }
 
+    private var lastProgress: String? = null
+    private var lastProgressMillis = 0L
+
+    /** Reads short progress notes like "Building or testing" aloud, without repeating them too often. */
+    @Synchronized
+    fun onProgress(text: String) {
+        if (!settings.readAloudInCar || !speaker.inCar) return
+        val now = System.currentTimeMillis()
+        if (text == lastProgress || now - lastProgressMillis < PROGRESS_GAP_MILLIS) return
+        lastProgress = text
+        lastProgressMillis = now
+        speaker.speak(text)
+    }
+
     /** Shows (or refreshes) the task's conversation so it pops up on the car screen. */
     fun post(task: Task) {
         val style = NotificationCompat.MessagingStyle(me)
@@ -64,6 +78,36 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             .addMessage("What should I work on in ${repo.name}? Reply with your request.", System.currentTimeMillis(), claude)
         notify(newTaskId(repo), style, replyTo = NEW_PREFIX + repo.fullName)
     }
+
+    private val chat = ArrayDeque<Triple<Boolean, String, Long>>()
+
+    /**
+     * The "Talk to Claude" conversation for Android Auto's messaging view. Replying to it by voice asks
+     * Claude directly, and the answer comes back in the same conversation and is read aloud. This works
+     * even when the car only shows AIAuto as a messaging app.
+     */
+    @Synchronized
+    fun postChat(fromClaude: String? = null, fromYou: String? = null) {
+        val now = System.currentTimeMillis()
+        fromYou?.let { chat.addLast(Triple(false, it, now)) }
+        fromClaude?.let { chat.addLast(Triple(true, it, now)) }
+        while (chat.size > MAX_MESSAGES) chat.removeFirst()
+        if (chat.isEmpty()) chat.addLast(Triple(true, CHAT_HELLO, now))
+        val style = NotificationCompat.MessagingStyle(me)
+            .setConversationTitle("Talk to Claude")
+            .setGroupConversation(false)
+        chat.forEach { (isClaude, text, time) -> style.addMessage(text, time, if (isClaude) claude else me) }
+        notify(CHAT_ID, style, replyTo = CHAT_TARGET)
+    }
+
+    /** Starts the conversation over with a greeting, e.g. each time the phone connects to the car. */
+    @Synchronized
+    fun startChat() {
+        chat.clear()
+        postChat(fromClaude = CHAT_HELLO)
+    }
+
+    fun clearChat() = manager.cancel(CHAT_ID)
 
     fun clearNewTask(repo: RepoRef) = manager.cancel(newTaskId(repo))
 
@@ -110,9 +154,10 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             .setOnlyAlertOnce(false)
             .addAction(reply)
             .addInvisibleAction(markRead)
-            .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) }))
+            .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) || it == CHAT_TARGET }))
             .build()
-        manager.notify(id, notification)
+        // Notifications can be blocked or throttled; that must never take a running task down with it.
+        runCatching { manager.notify(id, notification) }
     }
 
     private fun openApp(taskId: String?): PendingIntent = PendingIntent.getActivity(
@@ -129,6 +174,11 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         const val CH_WORKING = "working"
         const val WORKING_ID = 1
         const val NEW_PREFIX = "new:"
+        const val CHAT_TARGET = "chat"
+        private const val CHAT_ID = 2
+        private const val CHAT_HELLO = "Hi, it's Claude. Reply to this message and say anything. " +
+            "To skip the Send button, turn on Unknown sources in Android Auto and use Talk on the AIAuto screen."
         private const val MAX_MESSAGES = 8
+        private const val PROGRESS_GAP_MILLIS = 15_000L
     }
 }
