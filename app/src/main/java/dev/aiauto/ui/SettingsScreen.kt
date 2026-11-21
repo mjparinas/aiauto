@@ -337,23 +337,31 @@ private fun AccentRow(selected: Accent, onPick: (Accent) -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth().padding(start = 60.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 56.dp),
         ) {
             Accent.entries.forEach { accent ->
                 val on = accent == selected
+                // A 48 dp touch target around a 40 dp swatch, so each is easy to hit (Android's minimum).
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .weight(1f, fill = false)
-                        .widthIn(max = 40.dp)
+                        .widthIn(max = 48.dp)
                         .aspectRatio(1f)
                         .clip(CircleShape)
-                        .background(if (dark) accent.dark else accent.light)
                         .selectable(selected = on, role = Role.RadioButton, onClick = { onPick(accent) })
                         .semantics { contentDescription = accent.label },
                 ) {
-                    if (on) Icon(Icons.Rounded.Check, null, tint = if (dark) Color(0xFF1A1714) else Color.White, modifier = Modifier.size(20.dp))
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .fillMaxSize(40f / 48f)
+                            .clip(CircleShape)
+                            .background(if (dark) accent.dark else accent.light),
+                    ) {
+                        if (on) Icon(Icons.Rounded.Check, null, tint = if (dark) Color(0xFF1A1714) else Color.White, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
