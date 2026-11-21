@@ -45,7 +45,8 @@ class FileTaskStore(context: Context) : TaskStore {
     }
 
     @Synchronized
-    fun remove(id: String) = list.set(list.flow.value.filter { it.id != id })
+    fun setArchived(id: String, archived: Boolean) =
+        list.set(list.flow.value.map { if (it.id == id) it.copy(archived = archived) else it })
 }
 
 class RepoStore(context: Context) {

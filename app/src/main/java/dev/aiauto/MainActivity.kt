@@ -57,9 +57,11 @@ class MainActivity : ComponentActivity() {
 
                 when (val s = screen) {
                     Screen.Home -> HomeScreen(
-                        tasks = tasks,
+                        tasks = tasks.filterNot { it.archived },
                         hasRepos = repos.isNotEmpty() && g.isConfigured,
                         onOpen = { screen = Screen.Detail(it.id) },
+                        onArchive = { g.tasks.setArchived(it.id, true) },
+                        onUnarchive = { g.tasks.setArchived(it.id, false) },
                         onNew = { screen = Screen.NewTask },
                         onSettings = { screen = Screen.Settings },
                     )

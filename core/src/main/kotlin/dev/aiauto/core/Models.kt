@@ -52,6 +52,8 @@ data class Task(
     val messages: List<TaskMessage> = emptyList(),
     val createdMillis: Long,
     val updatedMillis: Long,
+    /** Hidden from the task lists after the user swipes it away. */
+    val archived: Boolean = false,
 ) {
     val lastMessage: TaskMessage? get() = messages.lastOrNull()
 }
