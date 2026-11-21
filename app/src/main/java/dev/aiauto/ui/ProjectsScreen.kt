@@ -2,7 +2,6 @@ package dev.aiauto.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,17 +10,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,8 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,16 +36,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.aiauto.core.Checks
+import dev.aiauto.core.ChecksSummary
 import dev.aiauto.core.PullStatus
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.RepoView
 import dev.aiauto.core.SpokenStatus
 
 /** Each repo's main branch, latest change and open pull requests, straight from GitHub. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectsScreen(
     repos: List<RepoRef>,
@@ -64,75 +64,122 @@ fun ProjectsScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
-                title = { Text("Projects", style = MaterialTheme.typography.titleLarge) },
-                actions = { IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-            )
+            ScreenTopBar("Projects", onBack) {
+                IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") }
+            }
         },
     ) { padding ->
+        if (repos.isEmpty()) {
+            EmptyState(
+                Icons.Rounded.FolderOpen, BadgeHue.Blue, "No repositories yet",
+                "Add a repo in Settings to see its branch, checks and pull requests here.",
+                Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         LazyColumn(
             Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            message?.let { item { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) } }
-            if (repos.isEmpty()) item { Text("Add a repo in Settings to see it here.", style = MaterialTheme.typography.bodyLarge) }
+            message?.let {
+                item {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                    )
+                }
+            }
             items(repos, key = { it.fullName }) { repo ->
-                RepoCard(repo, views[repo.fullName] ?: RepoView(loading = true)) { confirm = repo to it }
+                RepoSection(repo, views[repo.fullName] ?: RepoView(loading = true)) { confirm = repo to it }
             }
         }
     }
 }
 
+/** One repo: a small capital header, then a card with its main branch and a row per open pull request. */
 @Composable
-private fun RepoCard(repo: RepoRef, view: RepoView, onMerge: (PullStatus) -> Unit) {
+private fun RepoSection(repo: RepoRef, view: RepoView, onMerge: (PullStatus) -> Unit) {
     val context = LocalContext.current
     val open = { url: String -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(repo.fullName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.clickable { open(repo.url) })
-            if (view.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = MaterialTheme.colorScheme.primary)
-            view.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp)) }
-            val status = view.status ?: return@Column
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(repo.defaultBranch, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 8.dp))
-                ChecksLabel(status.branchChecks)
+    SectionHeader(repo.fullName)
+    SettingsCard {
+        if (view.loading) {
+            LinearProgressIndicator(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        view.error?.let { SettingRow(Icons.Rounded.ErrorOutline, BadgeHue.Red, "Couldn't load", it) }
+        val status = view.status ?: return@SettingsCard
+        StatusRow(
+            Icons.Rounded.AccountTree,
+            checksHue(status.branchChecks),
+            repo.defaultBranch,
+            status.branchChecks,
+            status.latest?.let { c -> c.message + (c.timeMillis?.let { " · " + SpokenStatus.ago(System.currentTimeMillis() - it) } ?: "") },
+            onClick = { open(repo.url) },
+        )
+        if (status.pulls.isEmpty()) {
+            SettingRow(Icons.Rounded.DoneAll, BadgeHue.Green, "No open pull requests")
+        }
+        status.pulls.forEach { p ->
+            StatusRow(
+                Icons.Rounded.Code,
+                checksHue(p.checks),
+                "#${p.pull.number} ${p.pull.title}",
+                p.checks,
+                listOfNotNull("Draft".takeIf { p.pull.draft }, "Auto-merge on".takeIf { p.pull.hasGitHubAutoMerge }).joinToString(" · ").ifBlank { null },
+                onClick = { open(p.pull.htmlUrl) },
+            ) {
+                if (!p.pull.draft) TextButton(onClick = { onMerge(p) }) { Text("Merge") }
             }
-            status.latest?.let { c ->
+        }
+    }
+}
+
+/** A row with a badge coloured by its checks, a title, the checks in words, and an optional line under them. */
+@Composable
+private fun StatusRow(
+    icon: ImageVector,
+    hue: BadgeHue,
+    title: String,
+    checks: ChecksSummary?,
+    detail: String?,
+    onClick: () -> Unit,
+    trailing: @Composable () -> Unit = {},
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(onClick = onClick)
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(icon, hue)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            ChecksLabel(checks)
+            if (!detail.isNullOrBlank()) {
                 Text(
-                    c.message + (c.timeMillis?.let { " · " + SpokenStatus.ago(System.currentTimeMillis() - it) } ?: ""),
+                    detail,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
-            if (status.pulls.isEmpty()) {
-                Text("No open pull requests", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            status.pulls.forEach { p ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { open(p.pull.htmlUrl) }.padding(vertical = 4.dp)) {
-                        Text("#${p.pull.number} ${p.pull.title}", style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Row {
-                            if (p.pull.draft) Text("Draft · ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ChecksLabel(p.checks)
-                            if (p.pull.hasGitHubAutoMerge) Text(" · auto-merge on", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    if (!p.pull.draft) TextButton(onClick = { onMerge(p) }) { Text("Merge") }
-                }
-            }
         }
+        trailing()
     }
+}
+
+private fun checksHue(summary: ChecksSummary?): BadgeHue = when (summary?.state) {
+    Checks.Passing -> BadgeHue.Green
+    Checks.Failing -> BadgeHue.Red
+    Checks.Pending -> BadgeHue.Amber
+    else -> BadgeHue.Blue
 }

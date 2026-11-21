@@ -2,7 +2,6 @@ package dev.aiauto.ui
 
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,44 +18,53 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ClearAll
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.rounded.ClearAll
-import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.ui.unit.sp
 import dev.aiauto.core.Checks
 import dev.aiauto.core.PrState
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
+import dev.aiauto.core.TaskStatus
 import dev.aiauto.core.needsYouFirst
 import kotlinx.coroutines.launch
 
@@ -94,15 +102,11 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("Tasks", style = MaterialTheme.typography.headlineMedium) },
-                actions = {
-                    if (finishedCount > 0 && !showArchived) IconButton(onClick = onClearFinished) { Icon(Icons.Rounded.ClearAll, "Clear $finishedCount finished") }
-                    IconButton(onClick = onProjects) { Icon(Icons.Rounded.FolderOpen, "Projects") }
-                    IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-            )
+            ScreenTopBar("Tasks", onBack = null, large = true) {
+                if (finishedCount > 0 && !showArchived) IconButton(onClick = onClearFinished) { Icon(Icons.Rounded.ClearAll, "Clear $finishedCount finished") }
+                IconButton(onClick = onProjects) { Icon(Icons.Rounded.FolderOpen, "Projects") }
+                IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings") }
+            }
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -115,14 +119,37 @@ fun HomeScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Active") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(if (archived.isEmpty()) "Archived" else "Archived (${archived.size})") })
+            // A two-way pill switch, as Tuned's segmented choices, rather than tabs with an underline.
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                listOf("Active", if (archived.isEmpty()) "Archived" else "Archived (${archived.size})").forEachIndexed { i, label ->
+                    SegmentedButton(
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        shape = SegmentedButtonDefaults.itemShape(i, 2),
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            inactiveContainerColor = MaterialTheme.colorScheme.surface,
+                            activeBorderColor = MaterialTheme.colorScheme.outline,
+                            inactiveBorderColor = MaterialTheme.colorScheme.outline,
+                        ),
+                    ) { Text(label) }
+                }
             }
             when {
                 shown.isNotEmpty() -> TaskList(shown, spentToday, dailyLimit, onOpen, onArchive = if (showArchived) null else archive)
-                showArchived -> ArchivedEmptyState()
-                else -> EmptyState(Modifier, hasRepos)
+                showArchived -> EmptyState(
+                    Icons.Rounded.Archive, BadgeHue.Blue, "No archived chats",
+                    "Swipe a task card, or archive it from its chat, to keep it here out of the main list.",
+                )
+                hasRepos -> EmptyState(
+                    Icons.Rounded.DirectionsCar, BadgeHue.Accent, "Nothing running yet",
+                    "Start a task by typing or speaking a request. In the car, pick a repo and reply by voice.",
+                )
+                else -> EmptyState(
+                    Icons.Rounded.Key, BadgeHue.Amber, "Let's get set up",
+                    "Add your Claude API key, a GitHub token and a repo in Settings to get started.",
+                )
             }
         }
     }
@@ -138,15 +165,12 @@ private fun TaskList(
 ) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
+        contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 96.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text(
-                "Today: ${SpokenStatus.money(spentToday)}" + (dailyLimit?.let { " of ${SpokenStatus.money(it)} limit" } ?: ""),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // The list is already inset 16 dp, so the header needs only 16 more to line up with the card text.
+            SectionHeader("Today · ${SpokenStatus.money(spentToday)}" + (dailyLimit?.let { " of ${SpokenStatus.money(it)}" } ?: ""), inset = 16.dp)
         }
         items(tasks, key = { it.id }) { task ->
             if (onArchive == null) TaskCard(task) { onOpen(task) }
@@ -172,7 +196,7 @@ private fun SwipeToArchive(onArchive: () -> Unit, content: @Composable () -> Uni
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clip(MaterialTheme.shapes.medium)
+                    .clip(CardShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                     .padding(horizontal = 24.dp),
                 contentAlignment = alignment,
@@ -184,101 +208,71 @@ private fun SwipeToArchive(onArchive: () -> Unit, content: @Composable () -> Uni
 }
 
 @Composable
-private fun ArchivedEmptyState() {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("No archived chats", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Swipe a task card, or archive it from its chat, to keep it here out of the main list.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-    }
-}
-
-@Composable
 private fun TaskCard(task: Task, onClick: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Pill(
-                    task.repo.name,
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                    Modifier.weight(1f, fill = false),
-                )
-                Spacer(Modifier.weight(1f).width(8.dp))
-                StatusPill(task.status, interrupted = task.interrupted)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            task.lastMessage?.let {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    it.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Row {
-                Text(
-                    DateUtils.getRelativeTimeSpanString(task.updatedMillis).toString(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (task.costUsd > 0) {
+    val (icon, hue) = task.status.badge(task.interrupted)
+    RoundCard(onClick = onClick) {
+        Row(verticalAlignment = Alignment.Top) {
+            IconBadge(icon, hue)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        SpokenStatus.money(task.costUsd),
-                        style = MaterialTheme.typography.labelMedium,
+                        task.repo.name.uppercase(),
+                        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 12.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    StatusPill(task.status, interrupted = task.interrupted)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                task.lastMessage?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        it.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                task.prNumber?.let {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        when (task.prState) {
-                            PrState.Merged -> "PR #$it merged"
-                            PrState.Closed -> "PR #$it closed"
-                            else -> "PR #$it · " + SpokenStatus.checks(task.checks)
-                        },
+                        DateUtils.getRelativeTimeSpanString(task.updatedMillis).toString() +
+                            (if (task.costUsd > 0) " · " + SpokenStatus.money(task.costUsd) else ""),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (task.checks?.state == Checks.Failing && task.prState != PrState.Merged) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
                     )
+                    task.prNumber?.let {
+                        val failing = task.checks?.state == Checks.Failing && task.prState != PrState.Merged
+                        Pill(
+                            when (task.prState) {
+                                PrState.Merged -> "PR #$it merged"
+                                PrState.Closed -> "PR #$it closed"
+                                else -> "PR #$it · " + SpokenStatus.checks(task.checks)
+                            },
+                            if (failing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun EmptyState(modifier: Modifier, hasRepos: Boolean) {
-    Column(
-        modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Nothing running yet", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            if (hasRepos) "Start a task by typing or speaking a request. In the car, pick a repo and reply by voice."
-            else "Add your Claude API key, a GitHub token and a repo in Settings to get started.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-    }
+/** The icon and colour of a task's round badge, by its status. */
+internal fun TaskStatus.badge(interrupted: Boolean): Pair<ImageVector, BadgeHue> = when {
+    this == TaskStatus.Failed && interrupted -> Icons.Rounded.CloudOff to BadgeHue.Amber
+    this == TaskStatus.Starting -> Icons.Rounded.HourglassTop to BadgeHue.Blue
+    this == TaskStatus.Working -> Icons.Rounded.Autorenew to BadgeHue.Accent
+    this == TaskStatus.NeedsInput -> Icons.Rounded.QuestionAnswer to BadgeHue.Amber
+    this == TaskStatus.Done -> Icons.Rounded.CheckCircle to BadgeHue.Green
+    this == TaskStatus.Failed -> Icons.Rounded.ErrorOutline to BadgeHue.Red
+    else -> Icons.Rounded.StopCircle to BadgeHue.Violet
 }

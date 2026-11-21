@@ -1,11 +1,9 @@
 package dev.aiauto.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -53,38 +50,29 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.SpokenStatus
 
@@ -320,106 +308,6 @@ fun SettingsScreen(
 
 private enum class SettingsDialog { AnthropicKey, GithubToken, PickRepos, AddRepo, DailyLimit, Theme }
 
-/** Small capitals over each card, lined up with the text on the card below it. A heading for screen readers. */
-@Composable
-internal fun SectionHeader(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelLarge.merge(TextStyle(fontWeight = FontWeight.Medium, letterSpacing = 1.2.sp)),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .padding(horizontal = 32.dp)
-            .padding(top = 20.dp, bottom = 8.dp)
-            .semantics {
-                heading()
-                contentDescription = text
-            },
-    )
-}
-
-/** One section's rows together on a rounded card; each row's press ripple stays inside the card's corners. */
-@Composable
-internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        Modifier
-            .padding(horizontal = 16.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(vertical = 6.dp),
-        content = content,
-    )
-}
-
-/** A line of small print under a card. */
-@Composable
-internal fun Note(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-internal fun SettingRow(
-    icon: ImageVector,
-    hue: BadgeHue,
-    title: String,
-    summary: String? = null,
-    enabled: Boolean = true,
-    onClick: (() -> Unit)? = null,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconBadge(icon, hue)
-        Spacer(Modifier.width(16.dp))
-        RowText(title, summary, Modifier.weight(1f))
-    }
-}
-
-@Composable
-internal fun SwitchRow(
-    icon: ImageVector,
-    hue: BadgeHue,
-    title: String,
-    summary: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            // Toggleable, so a screen reader says "on" or "off", and the whole row flips the switch.
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconBadge(icon, hue)
-        Spacer(Modifier.width(16.dp))
-        RowText(title, summary, Modifier.weight(1f))
-        Spacer(Modifier.width(16.dp))
-        Switch(checked = checked, onCheckedChange = null)
-    }
-}
-
-@Composable
-internal fun RowText(title: String, summary: String?, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        if (!summary.isNullOrBlank()) {
-            Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
 /** Accent colour: a row of round swatches, the chosen one ticked. Each shrinks a little on a narrow phone rather than being cut off. */
 @Composable
 private fun AccentRow(selected: Accent, onPick: (Accent) -> Unit) {
@@ -453,82 +341,6 @@ private fun AccentRow(selected: Accent, onPick: (Accent) -> Unit) {
             }
         }
     }
-}
-
-/**
- * The colours of a row's round icon badge. Each has a deep shade for the light theme and a soft one for the dark theme,
- * so the icon reads well on its own tinted circle either way. [Accent] follows the chosen accent colour.
- */
-internal enum class BadgeHue(val light: Long, val dark: Long) {
-    Blue(0xFF14509A, 0xFF8AB4F8),
-    Violet(0xFF5235C8, 0xFFB9A6FF),
-    Teal(0xFF005D52, 0xFF4DD0C2),
-    Red(0xFF9E1B1B, 0xFFFF8A80),
-    Amber(0xFF7A4700, 0xFFFFC266),
-    Green(0xFF1B5E20, 0xFF81C995),
-    Accent(0, 0),
-}
-
-@Composable
-internal fun IconBadge(icon: ImageVector, hue: BadgeHue) {
-    val colour = when {
-        hue == BadgeHue.Accent -> MaterialTheme.colorScheme.primary
-        MaterialTheme.colorScheme.background.luminance() < 0.5f -> Color(hue.dark)
-        else -> Color(hue.light)
-    }
-    Box(
-        Modifier.size(44.dp).background(colour.copy(alpha = 0.18f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = colour, modifier = Modifier.size(22.dp))
-    }
-}
-
-/** A dialog with one text field. Saving with a blank field is allowed only when [allowBlank] (it means "clear"). */
-@Composable
-internal fun TextDialog(
-    title: String,
-    label: String,
-    help: String? = null,
-    initial: String = "",
-    secret: Boolean = false,
-    keyboard: KeyboardType = if (secret) KeyboardType.Password else KeyboardType.Text,
-    confirm: String = "Save",
-    allowBlank: Boolean = false,
-    filter: (String) -> String = { it },
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (help != null) {
-                    Text(help, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = filter(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    singleLine = true,
-                    label = { Text(label) },
-                    visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                    keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(text.trim()); onDismiss() },
-                enabled = allowBlank || text.isNotBlank(),
-            ) { Text(confirm) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 /**
@@ -599,45 +411,5 @@ private fun PickReposDialog(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },
-    )
-}
-
-/** A setting with a fixed set of choices, picked from a list of radio buttons. */
-@Composable
-internal fun <T> ChoiceDialog(
-    title: String,
-    options: List<T>,
-    selected: T,
-    label: (T) -> String,
-    onDismiss: () -> Unit,
-    onSelect: (T) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
-        title = { Text(title) },
-        text = {
-            // Scrolls, so a long list such as the phone's voices still fits on screen.
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                options.forEach { option ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .selectable(selected = option == selected, role = Role.RadioButton, onClick = {
-                                onSelect(option)
-                                onDismiss()
-                            })
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = option == selected, onClick = null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(label(option), style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
