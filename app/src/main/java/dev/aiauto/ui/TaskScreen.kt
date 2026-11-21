@@ -46,6 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,7 +84,11 @@ fun TaskScreen(
     var confirmMerge by remember { mutableStateOf(false) }
     if (confirmMerge) task.prNumber?.let { ConfirmMergeDialog(it, task.checks, onConfirm = onMerge, onDismiss = { confirmMerge = false }) }
     val list = rememberLazyListState()
-    LaunchedEffect(task.messages.size) { if (task.messages.isNotEmpty()) list.animateScrollToItem(task.messages.size - 1) }
+    // The pull request card and cost header sit above the messages, so scroll to the list's real last item.
+    LaunchedEffect(task.messages.size) {
+        val above = (if (task.prUrl != null) 1 else 0) + (if (task.costUsd > 0) 1 else 0)
+        if (task.messages.isNotEmpty()) list.animateScrollToItem(above + task.messages.size - 1)
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -90,7 +99,12 @@ fun TaskScreen(
                     Column {
                         Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            StatusPill(task.status, interrupted = task.interrupted)
+                            // A polite live region, so TalkBack says "Needs you" or "Done" when the status changes.
+                            StatusPill(
+                                task.status,
+                                interrupted = task.interrupted,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
                             Text(
                                 task.repo.fullName,
                                 style = MaterialTheme.typography.labelMedium,
@@ -116,8 +130,9 @@ fun TaskScreen(
                         IconButton(onClick = onArchive) { Icon(Icons.Rounded.Archive, "Archive") }
                     }
                 },
-                // Tall enough for a two-line title plus the status/repo row.
-                expandedHeight = 88.dp,
+                // Tall enough for a two-line title plus the status/repo row, and it grows with the phone's font size
+                // so large text isn't clipped.
+                expandedHeight = 88.dp * LocalDensity.current.fontScale.coerceIn(1f, 2f),
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -229,6 +244,8 @@ private fun Message(message: TaskMessage) {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier
+                    // Who said it is shown only by the bubble's side and colour, so say it for screen readers.
+                    .semantics { contentDescription = "You: ${message.text}" }
                     .padding(start = 48.dp)
                     .widthIn(max = 320.dp)
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp))
@@ -241,6 +258,7 @@ private fun Message(message: TaskMessage) {
             message.text,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier
+                .semantics { contentDescription = "Claude: ${message.text}" }
                 .padding(end = 24.dp)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp))
                 .background(MaterialTheme.colorScheme.surface)

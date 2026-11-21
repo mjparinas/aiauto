@@ -24,16 +24,21 @@ class UpdatesTest {
         assertFalse(Versions.isNewer("v0.3.0-beta", "0.3.0"))
     }
 
-    private fun release(tag: String, prerelease: Boolean = false, apk: Boolean = true) = """
+    private fun release(
+        tag: String,
+        prerelease: Boolean = false,
+        apk: Boolean = true,
+        apkUrl: String = "https://github.com/mjparinas/cruisecontrol/releases/download/$tag/cruise-control-$tag.apk",
+    ) = """
         {"tag_name":"$tag","html_url":"https://github.com/mjparinas/aiauto/releases/tag/$tag","draft":false,
-         "prerelease":$prerelease,"assets":[${if (apk) """{"name":"aiauto-$tag.apk","size":123,"browser_download_url":"https://x/aiauto-$tag.apk"}""" else ""}],
+         "prerelease":$prerelease,"assets":[${if (apk) """{"name":"aiauto-$tag.apk","size":123,"browser_download_url":"$apkUrl"}""" else ""}],
          "body":"notes"}
     """.trimIndent()
 
     @Test fun findsANewerApk() {
         val update = UpdateSource().parse(release("v0.3.0"), "0.2.0")!!
         assertEquals("0.3.0", update.version)
-        assertEquals("https://x/aiauto-v0.3.0.apk", update.apkUrl)
+        assertEquals("https://github.com/mjparinas/cruisecontrol/releases/download/v0.3.0/cruise-control-v0.3.0.apk", update.apkUrl)
         assertEquals(123, update.apkSize)
     }
 
@@ -41,5 +46,11 @@ class UpdatesTest {
         assertNull(UpdateSource().parse(release("v0.2.0"), "0.2.0"))
         assertNull(UpdateSource().parse(release("v0.3.0", prerelease = true), "0.2.0"))
         assertNull(UpdateSource().parse(release("v0.3.0", apk = false), "0.2.0"))
+    }
+
+    @Test fun ignoresApksServedFromAnywhereButGitHub() {
+        assertNull(UpdateSource().parse(release("v0.3.0", apkUrl = "https://example.com/app.apk"), "0.2.0"))
+        assertNull(UpdateSource().parse(release("v0.3.0", apkUrl = "http://github.com/a/b/app.apk"), "0.2.0"))
+        assertNull(UpdateSource().parse(release("v0.3.0", apkUrl = "https://github.com.example.com/app.apk"), "0.2.0"))
     }
 }

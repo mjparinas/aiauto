@@ -16,7 +16,7 @@ commands. See "Voice commands" in the README.
   log tail as the next prompt.
 - **Review comments as prompts.** Watch the PR for new review comments and read them out: "Sam commented on PR 12:
   rename this function". Replying sends the comment plus your reply to the same session.
-- **Quick commands.** Recognise short replies like "stop", "status", "undo that", "start over" locally instead of
+- **Quick commands.** Recognize short replies like "stop", "status", "undo that", "start over" locally instead of
   sending them to Claude. "Status" reads the latest progress line; "stop" calls `TaskEngine.stop`.
 
 ## Start work without typing

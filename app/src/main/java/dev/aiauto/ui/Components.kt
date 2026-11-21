@@ -45,13 +45,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.aiauto.core.TaskStatus
 
+/** A task's status as a small coloured pill. The colours come from [BadgeHue], whose shades read at 4.5:1 on the pill. */
 @Composable
 fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: Boolean = false) {
-    val (label, color) = if (status == TaskStatus.Failed && interrupted) "Offline" to Color(0xFFB7791F) else when (status) {
+    val (label, color) = if (status == TaskStatus.Failed && interrupted) "Offline" to BadgeHue.Amber.colour() else when (status) {
         TaskStatus.Starting -> "Starting" to MaterialTheme.colorScheme.onSurfaceVariant
         TaskStatus.Working -> "Working" to MaterialTheme.colorScheme.primary
-        TaskStatus.NeedsInput -> "Needs you" to Color(0xFFB7791F)
-        TaskStatus.Done -> "Done" to Color(0xFF4F7A55)
+        TaskStatus.NeedsInput -> "Needs you" to BadgeHue.Amber.colour()
+        TaskStatus.Done -> "Done" to BadgeHue.Green.colour()
         TaskStatus.Failed -> "Stopped" to MaterialTheme.colorScheme.error
         TaskStatus.Stopped -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -147,13 +148,13 @@ fun PromptBar(placeholder: String, enabled: Boolean = true, onSend: (String) -> 
     }
 }
 
-/** A small colored label for a pull request's checks. */
+/** A small coloured label for a pull request's checks. */
 @Composable
 fun ChecksLabel(summary: dev.aiauto.core.ChecksSummary?, modifier: Modifier = Modifier) {
     val color = when (summary?.state) {
-        dev.aiauto.core.Checks.Passing -> Color(0xFF4F7A55)
+        dev.aiauto.core.Checks.Passing -> BadgeHue.Green.colour()
         dev.aiauto.core.Checks.Failing -> MaterialTheme.colorScheme.error
-        dev.aiauto.core.Checks.Pending -> Color(0xFFB7791F)
+        dev.aiauto.core.Checks.Pending -> BadgeHue.Amber.colour()
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(

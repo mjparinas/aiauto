@@ -170,7 +170,10 @@ class Graph(context: Context) {
     }
 
     /** Keeps repos, tasks and settings the same on every device signed in to the same GitHub account. */
-    val sync = dev.aiauto.data.SyncManager(settings, secrets, tasks, repos, chatMemory, scope)
+    val sync = dev.aiauto.data.SyncManager(settings, secrets, tasks, repos, chatMemory, scope) { id ->
+        notifier.clear(id)
+        engine.clear(id)
+    }
 
     /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */
     val projects = Projects(githubToken = { secrets.githubToken }, scope = scope)

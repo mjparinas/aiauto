@@ -16,21 +16,30 @@ data class SyncSnapshot(
     /** When [settings] last changed on any device. The newer side wins as a whole. */
     val settingsChangedMillis: Long = 0,
     val chat: List<ChatExchange> = emptyList(),
+    /** Ids of tasks cleared on any device, so a merge doesn't bring them back from the other side. */
+    val removedTasks: List<String> = emptyList(),
+    /** When the car chat's memory was last cleared on any device. Exchanges from before then stay forgotten. */
+    val chatForgottenMillis: Long = 0,
 )
 
 object SyncMerge {
     /** Messages kept per task in the synced copy, so the gist stays small. Each device keeps its own full history. */
     const val MESSAGES_PER_TASK = 60
 
+    /** Cleared task ids kept as tombstones. Old ones drop off; by then every device has seen them. */
+    const val REMOVED_KEPT = 300
+
     /**
      * Combines two snapshots. Repos are a union. Each task comes from whichever side changed it last, keeping every
      * message either side has. Settings come from whichever side changed them last. The car chat keeps the newest
-     * exchanges from both.
+     * exchanges from both. A task cleared on either side stays cleared, and so does car chat forgotten on either side.
      */
     fun merge(local: SyncSnapshot, remote: SyncSnapshot): SyncSnapshot {
         val repos = (local.repos + remote.repos).distinctBy { it.fullName.lowercase() }
+        val removed = (remote.removedTasks + local.removedTasks).distinct().takeLast(REMOVED_KEPT)
+        val removedSet = removed.toSet()
         val remoteTasks = remote.tasks.associateBy { it.id }
-        val ids = (local.tasks.map { it.id } + remote.tasks.map { it.id }).distinct()
+        val ids = (local.tasks.map { it.id } + remote.tasks.map { it.id }).distinct().filter { it !in removedSet }
         val localTasks = local.tasks.associateBy { it.id }
         val tasks = ids.map { id ->
             val a = localTasks[id]
@@ -49,7 +58,9 @@ object SyncMerge {
             }
         }.sortedByDescending { it.updatedMillis }
         val remoteSettingsWin = remote.settingsChangedMillis > local.settingsChangedMillis
+        val forgotten = maxOf(local.chatForgottenMillis, remote.chatForgottenMillis)
         val chat = (local.chat + remote.chat)
+            .filter { it.timeMillis > forgotten }
             .distinctBy { it.timeMillis to it.said }
             .sortedBy { it.timeMillis }
             .takeLast(ChatMemory.KEEP)
@@ -59,6 +70,8 @@ object SyncMerge {
             settings = if (remoteSettingsWin) remote.settings else local.settings,
             settingsChangedMillis = maxOf(local.settingsChangedMillis, remote.settingsChangedMillis),
             chat = chat,
+            removedTasks = removed,
+            chatForgottenMillis = forgotten,
         )
     }
 
