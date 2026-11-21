@@ -65,6 +65,7 @@ class RepoStore(context: Context) {
     fun add(repo: RepoRef) = list.set(list.flow.value.filter { it.fullName != repo.fullName } + repo)
 
     @Synchronized
+    fun remove(repo: RepoRef) = list.set(list.flow.value.filter { it.fullName != repo.fullName })
 
     fun find(fullName: String) = list.flow.value.firstOrNull { it.fullName == fullName }
 }
