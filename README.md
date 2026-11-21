@@ -77,7 +77,7 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
 ## Setup
 
 1. **Get the APK.** Download `cruise-control-vX.Y.Z.apk` from the latest
-   [release](https://github.com/mjparinas/aiauto/releases) and install it on your phone. You'll need to allow
+   [release](https://github.com/mjparinas/cruisecontrol/releases) and install it on your phone. You'll need to allow
    installs from that source. Every push also builds an APK, which you can find under the **Build** run's
    Artifacts in the Actions tab.
 2. **Claude API key.** Create one at [platform.claude.com](https://platform.claude.com). Usage is billed to that

@@ -110,7 +110,8 @@ class Updater(private val context: Context, private val scope: CoroutineScope) {
         val apk = File(dir, "aiauto-${update.tag}.apk")
         http.newCall(Request.Builder().url(update.apkUrl).build()).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("The download failed (HTTP ${response.code}).")
-            apk.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+            val body = response.body ?: throw IllegalStateException("The download was empty.")
+            apk.outputStream().use { out -> body.byteStream().copyTo(out) }
         }
         if (update.apkSize > 0 && apk.length() != update.apkSize) {
             apk.delete()
