@@ -108,7 +108,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
                     )
                 }

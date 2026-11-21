@@ -13,7 +13,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -55,7 +54,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSaveKeys: (anthropic: String, github: String) -> Unit,
     onAddRepo: (String) -> Unit,
-    onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
 ) {
     var anthropic by remember { mutableStateOf("") }
@@ -99,10 +97,7 @@ fun SettingsScreen(
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
             Section("Repositories")
             state.repos.forEach { repo ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(repo.fullName, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onRemoveRepo(repo) }) { Icon(Icons.Rounded.Close, "Remove") }
-                }
+                Text(repo.fullName, style = MaterialTheme.typography.bodyLarge)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
