@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.aiauto.core.TaskStatus
 
@@ -54,6 +55,11 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: B
         TaskStatus.Failed -> "Stopped" to MaterialTheme.colorScheme.error
         TaskStatus.Stopped -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
+    Pill(label, color, modifier, showDot = true)
+}
+
+@Composable
+fun Pill(label: String, color: Color, modifier: Modifier = Modifier, showDot: Boolean = false) {
     Row(
         modifier
             .clip(RoundedCornerShape(50))
@@ -61,9 +67,17 @@ fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: B
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = color)
+        if (showDot) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
