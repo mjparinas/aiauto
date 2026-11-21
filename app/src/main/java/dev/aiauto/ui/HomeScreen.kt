@@ -1,8 +1,10 @@
 package dev.aiauto.ui
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -24,18 +27,27 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.rounded.ClearAll
@@ -45,6 +57,7 @@ import dev.aiauto.core.PrState
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
 import dev.aiauto.core.needsYouFirst
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +65,8 @@ fun HomeScreen(
     tasks: List<Task>,
     hasRepos: Boolean,
     onOpen: (Task) -> Unit,
+    onArchive: (Task) -> Unit,
+    onUnarchive: (Task) -> Unit,
     onNew: () -> Unit,
     onSettings: () -> Unit,
     onProjects: () -> Unit,
@@ -64,8 +79,19 @@ fun HomeScreen(
     val showArchived = tab == 1
     val (archived, active) = tasks.partition { it.archived }
     val shown = if (showArchived) archived else active.needsYouFirst()
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val archive: (Task) -> Unit = { task ->
+        onArchive(task)
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar("Task archived", actionLabel = "Undo", withDismissAction = true)
+            if (result == SnackbarResult.ActionPerformed) onUnarchive(task)
+        }
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Tasks", style = MaterialTheme.typography.headlineMedium) },
@@ -93,7 +119,7 @@ fun HomeScreen(
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(if (archived.isEmpty()) "Archived" else "Archived (${archived.size})") })
             }
             when {
-                shown.isNotEmpty() -> TaskList(shown, spentToday, dailyLimit, onOpen)
+                shown.isNotEmpty() -> TaskList(shown, spentToday, dailyLimit, onOpen, onArchive = if (showArchived) null else archive)
                 showArchived -> ArchivedEmptyState()
                 else -> EmptyState(Modifier, hasRepos)
             }
@@ -102,7 +128,13 @@ fun HomeScreen(
 }
 
 @Composable
-private fun TaskList(tasks: List<Task>, spentToday: Double, dailyLimit: Double?, onOpen: (Task) -> Unit) {
+private fun TaskList(
+    tasks: List<Task>,
+    spentToday: Double,
+    dailyLimit: Double?,
+    onOpen: (Task) -> Unit,
+    onArchive: ((Task) -> Unit)?,
+) {
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
@@ -115,8 +147,39 @@ private fun TaskList(tasks: List<Task>, spentToday: Double, dailyLimit: Double?,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        items(tasks, key = { it.id }) { task -> TaskCard(task) { onOpen(task) } }
+        items(tasks, key = { it.id }) { task ->
+            if (onArchive == null) TaskCard(task) { onOpen(task) }
+            else SwipeToArchive(onArchive = { onArchive(task) }) { TaskCard(task) { onOpen(task) } }
+        }
     }
+}
+
+/** Swiping the card either way archives it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToArchive(onArchive: () -> Unit, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = {
+            if (it != SwipeToDismissBoxValue.Settled) onArchive()
+            it != SwipeToDismissBoxValue.Settled
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            val alignment = if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) Alignment.CenterEnd else Alignment.CenterStart
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                    .padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Icon(Icons.Rounded.Archive, contentDescription = "Archive", tint = MaterialTheme.colorScheme.primary)
+            }
+        },
+    ) { content() }
 }
 
 @Composable
@@ -129,7 +192,7 @@ private fun ArchivedEmptyState() {
         Text("No archived chats", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Archive a task from its chat to keep it here, out of the main list.",
+            "Swipe a task card, or archive it from its chat, to keep it here out of the main list.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,

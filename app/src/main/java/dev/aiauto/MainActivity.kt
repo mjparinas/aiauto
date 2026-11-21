@@ -84,6 +84,8 @@ class MainActivity : ComponentActivity() {
                         tasks = tasks,
                         hasRepos = repos.isNotEmpty() && g.isConfigured,
                         onOpen = { screen = Screen.Detail(it.id) },
+                        onArchive = { g.engine.archive(it.id); g.notifier.clear(it.id) },
+                        onUnarchive = { g.engine.unarchive(it.id) },
                         onNew = { screen = Screen.NewTask },
                         onSettings = { screen = Screen.Settings },
                         onProjects = {
