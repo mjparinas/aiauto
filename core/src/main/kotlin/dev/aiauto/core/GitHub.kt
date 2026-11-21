@@ -296,7 +296,7 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
         val file = gist.files[name] ?: return null
         if (!file.truncated) return file.content
         return file.rawUrl?.let { url ->
-            http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { it.body.string() }
+            http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { it.body?.string() }
         }
     }
 
@@ -330,7 +330,7 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
             .method(method, body?.toRequestBody("application/json".toMediaType()))
             .build()
         http.newCall(request).execute().use { response ->
-            val text = response.body.string()
+            val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 val message = runCatching { json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(text)["message"]?.toString()?.trim('"') }
                     .getOrNull() ?: "HTTP ${response.code}"

@@ -50,7 +50,7 @@ class UpdateSource(
         val body = http.newCall(request).execute().use { response ->
             if (response.code == 404) return null // no releases yet
             if (!response.isSuccessful) throw GitHubException(response.code, "GitHub: HTTP ${response.code}")
-            response.body.string()
+            response.body?.string().orEmpty()
         }
         return parse(body, currentVersion)
     }
@@ -64,7 +64,7 @@ class UpdateSource(
     }
 
     companion object {
-        const val APP_REPO = "mjparinas/aiauto"
+        const val APP_REPO = "mjparinas/cruisecontrol"
     }
 }
 
