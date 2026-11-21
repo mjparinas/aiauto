@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.0
+
+- Short spoken replies like status, stop, merge it, fix it, yes and no are handled by the app without starting a
+  Claude turn.
+- Merge a pull request by voice. The app checks for conflicts and GitHub Actions results and asks before merging.
+- After a pull request opens, the app watches its CI runs, announces the result and offers to have Claude fix a
+  failure.
+- Optional Settings switches let the app fix merge conflicts and failing checks on its own, up to three times per
+  task. Conflicting pull requests are never auto-merged.
+- Tasks that need a reply are listed first, merge results are reported, and new tasks start on the last-used repo.
+- Say a repo's name to the car assistant to add it.
+- After Claude's answer is read aloud on the car's Talk screen, the app listens for your reply and sends it when you
+  stop talking, so no tap is needed.
+- Swipe a task card on the phone to archive it, with undo.
+- The repository delete button is gone from Settings.
+
 ## v0.1.0
 
 First release.
