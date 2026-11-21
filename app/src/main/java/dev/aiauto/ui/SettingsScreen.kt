@@ -282,7 +282,7 @@ fun SettingsScreen(
         ) { onSaveKeys(it, "") }
         SettingsDialog.GithubToken -> TextDialog(
             title = "GitHub token",
-            help = "A fine-grained token with Contents and Pull requests set to read and write, and Checks and Commit statuses set to read, on your repos. For sync across devices, also set Gists to read and write.",
+            help = "A fine-grained token with Contents and Pull requests set to read and write, and Checks and Commit statuses set to read, on your repos. For sync across devices, include the private cruise-control-sync repo, or give Administration read and write so the app can make it.",
             label = "Token",
             secret = true,
             onDismiss = { dialog = null },
