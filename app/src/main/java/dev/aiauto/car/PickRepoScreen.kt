@@ -11,10 +11,14 @@ import androidx.car.app.model.Template
 import androidx.car.app.ScreenManager
 import dev.aiauto.TaskService
 import dev.aiauto.core.RepoRef
+import dev.aiauto.core.TaskTemplate
 import dev.aiauto.graph
 
-/** Picks the repo for a new task, then listens for the spoken request on the car screen. */
-class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
+/**
+ * Picks the repo for a new task, then listens for the spoken request on the car screen.
+ * With a [template], the task starts right away with the template's request instead.
+ */
+class PickRepoScreen(carContext: CarContext, private val template: TaskTemplate? = null) : Screen(carContext) {
     private val g = carContext.graph
 
     override fun onGetTemplate(): Template {
@@ -26,13 +30,14 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
                     .addText(repo.owner)
                     .setOnClickListener {
                         screenManager.pop()
-                        listenForTask(carContext, screenManager, repo)
+                        if (template != null) runTemplate(carContext, screenManager, repo, template)
+                        else listenForTask(carContext, screenManager, repo)
                     }
                     .build(),
             )
         }
         return ListTemplate.Builder()
-            .setTitle("Which repo?")
+            .setTitle(template?.let { "${it.name} in which repo?" } ?: "Which repo?")
             .setHeaderAction(Action.BACK)
             .setSingleList(items.build())
             .build()
@@ -44,6 +49,20 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
             val repos = carContext.graph.repos.repos.value
             if (repos.size == 1) listenForTask(carContext, screenManager, repos.first())
             else screenManager.push(PickRepoScreen(carContext))
+        }
+
+        /** Starts [template] as a task: straight away with one repo, otherwise asks which repo first. */
+        fun startTemplate(carContext: CarContext, screenManager: ScreenManager, template: TaskTemplate) {
+            val repos = carContext.graph.repos.repos.value
+            if (repos.size == 1) runTemplate(carContext, screenManager, repos.first(), template)
+            else screenManager.push(PickRepoScreen(carContext, template))
+        }
+
+        private fun runTemplate(carContext: CarContext, screenManager: ScreenManager, repo: RepoRef, template: TaskTemplate) {
+            val task = carContext.graph.engine.start(repo, template.prompt)
+            TaskService.ensureRunning(carContext)
+            CarToast.makeText(carContext, "Started ${template.name} in ${repo.name}", CarToast.LENGTH_SHORT).show()
+            screenManager.push(TaskDetailScreen(carContext, task.id))
         }
 
         private fun listenForTask(carContext: CarContext, screenManager: ScreenManager, repo: RepoRef) {

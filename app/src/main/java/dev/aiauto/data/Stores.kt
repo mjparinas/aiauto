@@ -9,6 +9,7 @@ import dev.aiauto.core.ModelChoice
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Task
 import dev.aiauto.core.TaskStore
+import dev.aiauto.core.TaskTemplate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.KSerializer
@@ -85,6 +86,23 @@ class FileChatMemory(context: Context) : dev.aiauto.core.ChatMemory {
 
     @Synchronized
     override fun forget() = list.set(emptyList())
+}
+
+/** Saved task templates. A new install starts with [TaskTemplate.defaults]; deleting them all keeps the list empty. */
+class TemplateStore(context: Context) {
+    private val file = File(context.filesDir, "templates.json")
+    private val list = JsonListFile(file, TaskTemplate.serializer()).also { if (!file.exists()) it.set(TaskTemplate.defaults) }
+    val templates: StateFlow<List<TaskTemplate>> = list.flow
+
+    @Synchronized
+    fun add(name: String, prompt: String): TaskTemplate {
+        val template = TaskTemplate(java.util.UUID.randomUUID().toString().take(8), name.trim(), prompt.trim())
+        list.set(list.flow.value + template)
+        return template
+    }
+
+    @Synchronized
+    fun remove(id: String) = list.set(list.flow.value.filter { it.id != id })
 }
 
 /** Non-secret settings, plus the agent setup tied to the current API key. */
