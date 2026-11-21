@@ -18,6 +18,7 @@ import dev.aiauto.data.FileTaskStore
 import dev.aiauto.data.RepoStore
 import dev.aiauto.data.Secrets
 import dev.aiauto.data.Settings
+import dev.aiauto.data.TemplateStore
 import dev.aiauto.notify.Notifier
 import dev.aiauto.notify.Speaker
 import android.util.Log
@@ -34,6 +35,7 @@ class Graph(context: Context) {
     val settings = Settings(context)
     val tasks = FileTaskStore(context)
     val repos = RepoStore(context)
+    val templates = TemplateStore(context)
     val speaker = Speaker(context, settings)
     val notifier = Notifier(context, settings, speaker)
     // Anything that slips past the engine's own error handling is logged instead of crashing the app.
@@ -87,7 +89,8 @@ class Graph(context: Context) {
                     "- task ${t.id} in ${t.repo.fullName}: ${t.title} (${dev.aiauto.car.TasksScreen.statusLabel(t)})" +
                         (t.lastMessage?.let { ". Last said: ${it.text.take(300)}" } ?: "")
                 }.ifEmpty { "none" }
-                return "Saved repos: $repoList\nRecent tasks:\n$recent"
+                val saved = templates.templates.value.joinToString("\n") { "- ${it.name}: ${it.prompt}" }.ifEmpty { "none" }
+                return "Saved repos: $repoList\nRecent tasks:\n$recent\nTask templates (saved requests the driver can start by name):\n$saved"
             }
 
             override fun startTask(repo: String, request: String): String {

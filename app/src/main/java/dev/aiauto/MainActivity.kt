@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
                 dev.aiauto.update.UpdateDialog((application as AiAutoApp).updater)
                 val tasks by g.tasks.tasks.collectAsStateWithLifecycle()
                 val repos by g.repos.repos.collectAsStateWithLifecycle()
+                val templates by g.templates.templates.collectAsStateWithLifecycle()
                 val views by g.projects.repos.collectAsStateWithLifecycle()
                 var projectMessage by remember { mutableStateOf<String?>(null) }
                 val scope = rememberCoroutineScope()
@@ -120,6 +121,9 @@ class MainActivity : ComponentActivity() {
                     Screen.NewTask -> NewTaskScreen(
                         repos = repos,
                         lastUsed = tasks.maxByOrNull { it.createdMillis }?.repo,
+                        templates = templates,
+                        onAddTemplate = { name, prompt -> g.templates.add(name, prompt) },
+                        onDeleteTemplate = { g.templates.remove(it.id) },
                         onBack = { screen = Screen.Home },
                         onStart = { repo, text ->
                             val task = g.engine.start(repo, text)
