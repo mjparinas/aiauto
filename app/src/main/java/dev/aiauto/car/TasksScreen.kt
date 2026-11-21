@@ -43,8 +43,9 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
         val all = g.tasks.tasks.value.filter { !it.archived }.needsYouFirst()
         val finished = all.count { it.isFinished && !g.engine.isRunning(it.id) }
         val canTalk = g.isConfigured && g.repos.repos.value.isNotEmpty()
-        // Car lists hold about six rows; keep one for "Talk to Claude" and one for "Clear finished" when shown.
-        val tasks = all.take(MAX_ROWS - (if (canTalk) 1 else 0) - (if (finished > 0) 1 else 0))
+        val hasTemplates = canTalk && g.templates.templates.value.isNotEmpty()
+        // Car lists hold about six rows; keep one each for "Talk to Claude", "Templates" and "Clear finished" when shown.
+        val tasks = all.take(MAX_ROWS - (if (canTalk) 1 else 0) - (if (hasTemplates) 1 else 0) - (if (finished > 0) 1 else 0))
         if (canTalk) {
             items.addItem(
                 Row.Builder()
@@ -54,6 +55,15 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
                     .setOnClickListener { PickRepoScreen.startNewTask(carContext, screenManager) }
                     .build(),
             )
+            if (hasTemplates) {
+                items.addItem(
+                    Row.Builder()
+                        .setTitle("Templates")
+                        .addText(g.templates.templates.value.take(3).joinToString(", ") { it.name })
+                        .setOnClickListener { screenManager.push(TemplatesScreen(carContext)) }
+                        .build(),
+                )
+            }
         } else if (tasks.isEmpty()) {
             items.setNoItemsMessage(if (g.isConfigured) "Add a repo on your phone first." else "Finish setup on your phone first.")
         }
