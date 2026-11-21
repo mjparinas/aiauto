@@ -1,0 +1,183 @@
+package dev.aiauto.core
+
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Opens each task's pull request, follows its checks, and merges it when auto-merge is on.
+ * When the auto-fix settings are on, failing checks and merge conflicts go straight back to Claude through [autoFix].
+ */
+internal class PullRequests(
+    private val store: TaskStore,
+    private val config: EngineConfig,
+    private val journal: TaskJournal,
+    private val clock: () -> Long,
+    private val githubFactory: (String) -> GitHub,
+    private val autoFix: (taskId: String, prompt: String) -> Unit = { _, _ -> },
+) {
+    private val mergeRefusals = ConcurrentHashMap<String, String>()
+
+    /** True when [task]'s pull request checks or merge are still worth watching. */
+    fun needsWatching(task: Task, now: Long): Boolean {
+        if (!task.hasOpenPr) return false
+        if (now - (task.prOpenedMillis ?: task.updatedMillis) > WATCH_MILLIS) return false
+        return when (task.checks?.state) {
+            null, Checks.Pending, Checks.None -> true
+            Checks.Passing -> config.autoMerge() || config.autoFixConflicts()
+            Checks.Failing, Checks.Unknown -> false
+        }
+    }
+
+    /**
+     * Opens a pull request for the task's branch if Claude pushed it, or picks up one that already exists.
+     * Does nothing when there's no GitHub token or the branch isn't there. Safe to repeat.
+     */
+    fun open(taskId: String) {
+        val task = store.get(taskId) ?: return
+        val token = config.githubToken() ?: return
+        val github = githubFactory(token)
+        if (!github.branchExists(task.repo, task.branch)) return
+        val pr = github.findPull(task.repo, task.branch) ?: github.openPull(task.repo, task.branch, task.title, body(task))
+        val open = pr.prState == PrState.Open
+        // GitHub's own auto-merge keeps working with the phone off. It needs the repo setting
+        // and required checks; otherwise the app merges once it sees the checks pass.
+        val githubMerges = open && config.autoMerge() && !pr.draft && runCatching { github.enableAutoMerge(pr) }.getOrDefault(false)
+        journal.update(taskId) {
+            it.copy(
+                prUrl = pr.htmlUrl, prNumber = pr.number, prState = pr.prState,
+                prOpenedMillis = clock(), githubAutoMerge = githubMerges || pr.hasGitHubAutoMerge,
+            )
+        }
+        journal.status(
+            taskId,
+            when {
+                !open -> "Pull request ${pr.number} is already ${pr.prState.name.lowercase()}."
+                githubMerges -> "Pull request ${pr.number} is open. GitHub will merge it when checks pass."
+                config.autoMerge() -> "Pull request ${pr.number} is open. I'll merge it when checks pass."
+                else -> "Pull request ${pr.number} is open for review."
+            },
+        )
+    }
+
+    /**
+     * A follow-up turn may have pushed new commits: restart the watch window and read the new head's checks,
+     * so a fix for failing checks gets watched and merged instead of staying stuck on the old result.
+     */
+    fun rewatch(taskId: String) {
+        // New commits mean GitHub works out mergeability again; a conflict that's still there gets reported anew.
+        journal.update(taskId) { it.copy(prOpenedMillis = clock(), conflicts = false) }
+        // On failure the regular refresh tries again later.
+        runCatching { refresh(taskId) }
+    }
+
+    /** Fetches one task's pull request and checks, says what changed, and merges it if it's ready. */
+    fun refresh(taskId: String) {
+        val task = store.get(taskId) ?: return
+        val number = task.prNumber ?: return
+        val token = config.githubToken() ?: return
+        val github = githubFactory(token)
+        val pr = github.pull(task.repo, number)
+        val state = pr.prState
+        val checks = if (state == PrState.Open && pr.head.sha.isNotEmpty()) github.checks(task.repo, pr.head.sha) else task.checks
+        // While GitHub is still working out mergeability, keep what it said last.
+        val conflicts = state == PrState.Open && (pr.hasConflicts ?: task.conflicts)
+        journal.update(taskId) { it.copy(prState = state, checks = checks, githubAutoMerge = pr.hasGitHubAutoMerge, prUrl = pr.htmlUrl, conflicts = conflicts) }
+
+        val willMerge = state == PrState.Open && config.autoMerge() && !pr.draft && !pr.hasGitHubAutoMerge && !conflicts &&
+            checks != null && readyToMerge(checks, task, clock())
+        val fixingConflicts = conflicts && !task.conflicts && conflictsFound(taskId, number)
+        val beforeState = task.prState ?: PrState.Open
+        when {
+            state == PrState.Merged && beforeState != PrState.Merged -> journal.status(taskId, "Pull request $number was merged.")
+            state == PrState.Closed && beforeState != PrState.Closed -> journal.status(taskId, "Pull request $number was closed without merging.")
+            state == PrState.Open && checks != null && checks.state != task.checks?.state -> when (checks.state) {
+                Checks.Failing -> {
+                    val failed = "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}."
+                    // A conflict fix pushes new commits, which run the checks again, so don't ask for both at once.
+                    if (!fixingConflicts && tryAutoFix(taskId, config.autoFixChecks(), TaskEngine.fixChecksPrompt(store.get(taskId) ?: task))) {
+                        journal.status(taskId, "$failed Asking Claude to fix them.")
+                    } else {
+                        journal.update(taskId) { it.copy(pending = PendingAction.FixChecks) }
+                        journal.status(taskId, "$failed Say yes to have Claude fix them.")
+                    }
+                }
+                Checks.Passing -> journal.status(
+                    taskId,
+                    "Checks passed on pull request $number." + when {
+                        willMerge -> " Merging it now."
+                        pr.hasGitHubAutoMerge -> " GitHub will merge it."
+                        else -> ""
+                    },
+                )
+                else -> {}
+            }
+        }
+        if (!willMerge) return
+        val refusalKey = "$taskId:${pr.head.sha}"
+        when (val result = github.merge(task.repo, number)) {
+            MergeResult.Merged, MergeResult.AutoMergeOn -> {
+                journal.update(taskId) { it.copy(prState = PrState.Merged) }
+                journal.status(taskId, "Merged pull request $number.")
+            }
+            is MergeResult.Refused -> if (mergeRefusals.put(refusalKey, result.reason) == null) {
+                journal.status(taskId, "Couldn't merge pull request $number. ${result.reason}")
+            }
+        }
+    }
+
+    /** Merges a task's pull request now, at the user's request. Returns a sentence saying what happened. */
+    fun mergeNow(taskId: String): String {
+        val task = store.get(taskId) ?: return "That task is gone."
+        val number = task.prNumber ?: return "This task has no pull request."
+        val token = config.githubToken() ?: return "Add a GitHub token in Settings."
+        val message = Projects.mergeMessage(githubFactory(token), task.repo, number)
+        journal.status(taskId, message)
+        runCatching { refresh(taskId) }
+        return message
+    }
+
+    /** Announces new merge conflicts and fixes them or asks to. Returns true when Claude was asked to fix them. */
+    private fun conflictsFound(taskId: String, number: Int): Boolean {
+        val task = store.get(taskId) ?: return false
+        val base = task.repo.defaultBranch
+        if (tryAutoFix(taskId, config.autoFixConflicts(), TaskEngine.fixConflictsPrompt(task))) {
+            journal.status(taskId, "Pull request $number has merge conflicts with $base. Asking Claude to fix them.")
+            return true
+        }
+        journal.update(taskId) { it.copy(pending = PendingAction.FixConflicts) }
+        journal.status(taskId, "Pull request $number has merge conflicts with $base. Say yes to have Claude fix them.")
+        return false
+    }
+
+    /** Hands [prompt] to Claude when [enabled] and the task hasn't used up its automatic fixes. */
+    private fun tryAutoFix(taskId: String, enabled: Boolean, prompt: String): Boolean {
+        if (!enabled || (store.get(taskId)?.autoFixes ?: MAX_AUTO_FIXES) >= MAX_AUTO_FIXES) return false
+        journal.update(taskId) { it.copy(autoFixes = it.autoFixes + 1, pending = null) }
+        autoFix(taskId, prompt)
+        return true
+    }
+
+    private fun readyToMerge(checks: ChecksSummary, task: Task, now: Long): Boolean = when (checks.state) {
+        Checks.Passing -> true
+        // A repo without CI: give checks time to show up before treating "none" as green.
+        Checks.None -> now - (task.prOpenedMillis ?: task.updatedMillis) > NO_CHECKS_GRACE_MILLIS
+        else -> false
+    }
+
+    private fun body(task: Task): String = buildString {
+        appendLine("Requested by voice from AIAuto.")
+        appendLine()
+        task.messages.filter { it.speaker == Speaker.You }.forEach { appendLine("> ${it.text}") }
+        task.messages.lastOrNull { it.speaker == Speaker.Claude }?.let {
+            appendLine()
+            appendLine(it.text)
+        }
+    }
+
+    private companion object {
+        /** How long after opening a pull request the app keeps watching its checks. */
+        const val WATCH_MILLIS = 3 * 60 * 60 * 1000L
+        const val NO_CHECKS_GRACE_MILLIS = 10 * 60 * 1000L
+        /** Automatic fix attempts per task before the app goes back to asking the driver. */
+        const val MAX_AUTO_FIXES = 3
+    }
+}

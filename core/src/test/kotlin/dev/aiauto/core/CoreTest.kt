@@ -10,6 +10,18 @@ class CoreTest {
         assertEquals(RepoRef("mjparinas", "aiauto"), RepoRef.parse("mjparinas/aiauto"))
         assertEquals(RepoRef("a", "b.c"), RepoRef.parse("https://github.com/a/b.c.git"))
         assertNull(RepoRef.parse("not a repo"))
+        assertNull(RepoRef.parse("../.."))
+        assertNull(RepoRef.parse("owner/.."))
+    }
+
+    @Test fun matchesSpokenRepoNames() {
+        val mine = listOf(RepoRef("mjparinas", "aiauto"), RepoRef("mjparinas", "my-site"), RepoRef("other", "my_site"))
+        assertEquals(listOf(mine[0]), RepoRef.matchSpoken("AI auto", mine))
+        assertEquals(listOf(mine[0]), RepoRef.matchSpoken("mjparinas/aiauto", mine))
+        assertEquals(listOf(mine[1]), RepoRef.matchSpoken("mjparinas slash my site", mine))
+        assertEquals(mine.drop(1), RepoRef.matchSpoken("my site", mine))
+        assertTrue(RepoRef.matchSpoken("nothing", mine).isEmpty())
+        assertTrue(RepoRef.matchSpoken("  ", mine).isEmpty())
     }
 
     @Test fun cleansMarkdownForSpeech() {
@@ -27,6 +39,12 @@ class CoreTest {
         assertEquals("Pushing changes to GitHub", SpokenStatus.forToolUse("bash", "git push -u origin x"))
         assertEquals("Building or testing", SpokenStatus.forToolUse("bash", "npm test"))
         assertEquals("Editing files", SpokenStatus.forToolUse("edit", null))
+    }
+
+    @Test fun putsTasksThatNeedYouFirst() {
+        fun task(id: String, status: TaskStatus) = Task(id, RepoRef("a", "b"), id, id, status = status, createdMillis = 0, updatedMillis = 0)
+        val tasks = listOf(task("1", TaskStatus.Working), task("2", TaskStatus.NeedsInput), task("3", TaskStatus.Done), task("4", TaskStatus.NeedsInput))
+        assertEquals(listOf("2", "4", "1", "3"), tasks.needsYouFirst().map { it.id })
     }
 
     @Test fun makesTitlesAndBranches() {
