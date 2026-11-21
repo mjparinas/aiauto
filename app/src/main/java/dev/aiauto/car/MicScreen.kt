@@ -10,6 +10,7 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import dev.aiauto.R
@@ -21,8 +22,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * The car's home screen: one big mic button. Tap it, say anything, and Claude's answer is read aloud
- * and shown here. Claude can start or answer coding tasks from the conversation too. The task list is
- * one tap away in the corner.
+ * and shown here. Once the answer has been read out it listens again, so the driver can reply without
+ * tapping; saying nothing ends the conversation. Claude can start or answer coding tasks from the
+ * conversation too. The task list is one tap away in the corner.
  */
 class MicScreen(carContext: CarContext) : Screen(carContext) {
     private val g = carContext.graph
@@ -58,6 +60,11 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
         )
     }
 
+    /** Starts listening again after [reply] is read out, unless the driver moved on in the meantime. */
+    private fun listenForReply(reply: String) {
+        if (state == State.Idle && text == reply && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) talk()
+    }
+
     private fun stopListening() {
         voice.cancel()
         show(State.Idle, HELLO)
@@ -71,7 +78,7 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
                 runCatching { g.assistant.ask(spoken) }.getOrElse { "Sorry, that didn't go through. Try again." }
             }
             show(State.Idle, reply)
-            runCatching { g.speaker.speak(reply) }
+            runCatching { g.speaker.speak(reply) { lifecycleScope.launch { listenForReply(reply) } } }
         }
     }
 
