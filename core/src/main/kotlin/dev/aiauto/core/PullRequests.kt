@@ -164,7 +164,7 @@ internal class PullRequests(
     }
 
     private fun body(task: Task): String = buildString {
-        appendLine("Requested by voice from AIAuto.")
+        appendLine("Requested by voice from Cruise Control.")
         appendLine()
         task.messages.filter { it.speaker == Speaker.You }.forEach { appendLine("> ${it.text}") }
         task.messages.lastOrNull { it.speaker == Speaker.Claude }?.let {

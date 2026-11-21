@@ -1,4 +1,4 @@
-# AIAuto
+# Cruise Control
 
 Talk to Claude from Android Auto. Pick one of your GitHub repos, say what you want changed, and Claude does the
 work in the cloud. It makes the change on a new branch, runs the tests, and opens a pull request. Updates come back
@@ -28,7 +28,7 @@ the conversation. Claude can also start a coding task in one of your saved repos
 ask it to. You can also add a repo by voice: say something like "add my repo aiauto" and Claude finds it among the
 repos your GitHub token can push to and saves it. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
 
-If the car only shows AIAuto's messaging view ("No new messages during this drive"), Android Auto is hiding the
+If the car only shows Cruise Control's messaging view ("No new messages during this drive"), Android Auto is hiding the
 app screen, usually because **Unknown sources** is off (see setup below). You can still talk to Claude there: each
 time the phone connects to the car, a **Talk to Claude** conversation appears. Tap it, reply by voice, and Claude's
 answer arrives in the same conversation and is read aloud. In this view Android Auto asks you to confirm with a
@@ -38,7 +38,7 @@ send your words as soon as you stop speaking, so turn on **Unknown sources** to 
 Voice input also works inside tasks: open **Tasks**, then tap **Talk to Claude** at the top of the list (or **New task**),
 pick a repo if you have more than one, and speak your request. To answer Claude, open a task and tap **Reply**, then
 speak. The app uses the car's microphone when Android Auto supports it, and the phone's otherwise. If voice
-doesn't work, you can fall back to replying to the AIAuto message through Android Auto's messaging flow.
+doesn't work, you can fall back to replying to the Cruise Control message through Android Auto's messaging flow.
 
 **Projects** shows each repo straight from GitHub: whether its main branch is passing, the last change, and its
 open pull requests with their checks. Tap a pull request to hear its checks or merge it (the app asks first).
@@ -76,7 +76,7 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
 
 ## Setup
 
-1. **Get the APK.** Download `aiauto-vX.Y.Z.apk` from the latest
+1. **Get the APK.** Download `cruise-control-vX.Y.Z.apk` from the latest
    [release](https://github.com/mjparinas/aiauto/releases) and install it on your phone. You'll need to allow
    installs from that source. Every push also builds an APK, which you can find under the **Build** run's
    Artifacts in the Actions tab.
@@ -98,7 +98,7 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
    Messaging notifications work without it.
 6. **Background work.** The first time you open the app it asks to ignore battery optimization. Say yes: otherwise
    Android (Samsung phones especially) may stop Claude's tasks soon after you unplug from the car. You can change it
-   later under Settings > Apps > AIAuto > Battery > Unrestricted.
+   later under Settings > Apps > Cruise Control > Battery > Unrestricted.
 
 ## Building locally
 

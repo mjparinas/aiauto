@@ -1,6 +1,6 @@
 # Feature ideas
 
-Ideas for what AIAuto could do next, based on what's already in the app (voice tasks, one Managed Agents session per
+Ideas for what Cruise Control could do next, based on what's already in the app (voice tasks, one Managed Agents session per
 task, PRs opened automatically, updates read aloud). Ordered roughly by how much they'd improve the drive.
 
 ## Close the loop by voice
@@ -23,7 +23,7 @@ commands. See "Voice commands" in the README.
 
 - **Issues to tasks.** "Fix issue 34 in aiauto" fetches the issue title and body and starts a task with them, then
   links the PR with "Closes #34".
-- **Google Assistant shortcut.** An App Actions capability so "Hey Google, ask AIAuto to add dark mode to aiauto"
+- **Google Assistant shortcut.** An App Actions capability so "Hey Google, ask Cruise Control to add dark mode to aiauto"
   starts a task with no taps at all.
 - **Repo by name in the request.** Let the first sentence choose the repo ("in aiauto, add a settings toggle"), with
   fuzzy matching against saved repos so transcription slips still work.

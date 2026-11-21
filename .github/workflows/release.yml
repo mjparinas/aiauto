@@ -49,5 +49,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.version || github.ref_name }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "aiauto-$TAG.apk"
-          gh release create "$TAG" "aiauto-$TAG.apk" --title "AIAuto $TAG" --target "$GITHUB_SHA" --generate-notes
+          cp app/build/outputs/apk/release/app-release.apk "cruise-control-$TAG.apk"
+          gh release create "$TAG" "cruise-control-$TAG.apk" --title "Cruise Control $TAG" --target "$GITHUB_SHA" --generate-notes
