@@ -31,7 +31,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
     private val claude = Person.Builder()
         .setName("Claude")
         .setKey("claude")
-        .setIcon(IconCompat.createWithResource(context, R.drawable.ic_spark))
+        .setIcon(IconCompat.createWithResource(context, R.drawable.ic_glyph))
         .build()
 
     fun createChannels() {
@@ -114,7 +114,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
     fun clear(taskId: String) = manager.cancel(taskId.hashCode())
 
     fun workingNotification() = NotificationCompat.Builder(context, CH_WORKING)
-        .setSmallIcon(R.drawable.ic_spark)
+        .setSmallIcon(R.drawable.ic_glyph)
         .setContentTitle("Claude is working")
         .setContentText("Updates will arrive as messages.")
         .setOngoing(true)
@@ -131,7 +131,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             Intent(context, ReplyReceiver::class.java).setAction(ReplyReceiver.ACTION_REPLY).putExtra(ReplyReceiver.EXTRA_TARGET, replyTo),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
-        val reply = NotificationCompat.Action.Builder(R.drawable.ic_spark, "Reply", replyIntent)
+        val reply = NotificationCompat.Action.Builder(R.drawable.ic_glyph, "Reply", replyIntent)
             .addRemoteInput(RemoteInput.Builder(ReplyReceiver.KEY_TEXT).setLabel("Tell Claude").build())
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .setShowsUserInterface(false)
@@ -141,13 +141,13 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             Intent(context, ReplyReceiver::class.java).setAction(ReplyReceiver.ACTION_READ).putExtra(ReplyReceiver.EXTRA_TARGET, replyTo),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val markRead = NotificationCompat.Action.Builder(R.drawable.ic_spark, "Mark as read", readIntent)
+        val markRead = NotificationCompat.Action.Builder(R.drawable.ic_glyph, "Mark as read", readIntent)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .setShowsUserInterface(false)
             .build()
 
         val notification = NotificationCompat.Builder(context, CH_TASKS)
-            .setSmallIcon(R.drawable.ic_spark)
+            .setSmallIcon(R.drawable.ic_glyph)
             .setColor(0xFFC96F4A.toInt())
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
