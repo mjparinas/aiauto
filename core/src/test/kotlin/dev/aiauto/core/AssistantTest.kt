@@ -9,6 +9,7 @@ class AssistantTest {
         override fun context() = "none"
         override fun startTask(repo: String, request: String) = fail("not expected")
         override fun replyToTask(taskId: String, text: String) = fail("not expected")
+        override fun addRepo(name: String) = fail("not expected")
     }
 
     @Test

@@ -9,6 +9,8 @@ import dev.aiauto.core.AgentSetup
 import dev.aiauto.core.Assistant
 import dev.aiauto.core.AssistantActions
 import dev.aiauto.core.EngineConfig
+import dev.aiauto.core.GitHub
+import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Projects
 import dev.aiauto.core.TaskEngine
 import dev.aiauto.data.FileTaskStore
@@ -84,6 +86,29 @@ class Graph(context: Context) {
                 engine.prompt(task.id, text)
                 TaskService.ensureRunning(appContext)
                 return "Sent to task ${task.id}."
+            }
+
+            override fun addRepo(name: String): String {
+                val token = secrets.githubToken ?: throw IllegalStateException("Add a GitHub token in the app on your phone first.")
+                require(name.isNotBlank()) { "No repo name was given." }
+                val github = GitHub(token)
+                val exact = RepoRef.parse(name)
+                val repo = if (exact != null) {
+                    github.repo(exact.owner, exact.name)
+                } else {
+                    val mine = github.myRepos()
+                    val matches = RepoRef.matchSpoken(name, mine)
+                    when {
+                        matches.size == 1 -> matches.first()
+                        matches.isEmpty() -> throw IllegalArgumentException(
+                            "None of your GitHub repos is called \"$name\". Recent ones: ${mine.take(5).joinToString { it.name }}",
+                        )
+                        else -> throw IllegalArgumentException("More than one repo matches: ${matches.joinToString { it.fullName }}. Say the owner too.")
+                    }
+                }
+                if (repos.find(repo.fullName) != null) return "${repo.fullName} is already saved."
+                repos.add(repo)
+                return "Added ${repo.fullName}."
             }
         },
         canSpend = { settings.dailyLimitUsd?.let { settings.spentTodayUsd < it } ?: true },

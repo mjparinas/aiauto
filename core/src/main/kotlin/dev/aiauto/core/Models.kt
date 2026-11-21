@@ -22,6 +22,21 @@ data class RepoRef(
             if (match.groupValues.drop(1).any { it.all { c -> c == '.' } }) return null
             return RepoRef(match.groupValues[1], match.groupValues[2])
         }
+
+        /**
+         * Finds the repos in [candidates] that match a spoken name, ignoring case, spaces and punctuation,
+         * so "AI auto" matches aiauto and "my parinas slash ai auto" can match mjparinas/aiauto.
+         * Matches on the full name first, then on the name alone.
+         */
+        fun matchSpoken(spoken: String, candidates: List<RepoRef>): List<RepoRef> {
+            fun norm(s: String) = s.lowercase().replace(" slash ", "/").filter { it.isLetterOrDigit() }
+            val said = norm(spoken)
+            if (said.isEmpty()) return emptyList()
+            val byFull = candidates.filter { norm(it.fullName) == said }
+            if (byFull.isNotEmpty()) return byFull
+            val nameOnly = norm(spoken.substringAfterLast('/').substringAfterLast(" slash "))
+            return candidates.filter { norm(it.name) == nameOnly }
+        }
     }
 }
 

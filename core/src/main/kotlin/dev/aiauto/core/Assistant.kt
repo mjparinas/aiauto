@@ -24,6 +24,9 @@ interface AssistantActions {
 
     /** Sends a follow-up message to an existing task. Returns what to tell Claude. */
     fun replyToTask(taskId: String, text: String): String
+
+    /** Saves a repo from its spoken name (owner/name or just the name). Returns what to tell Claude. */
+    fun addRepo(name: String): String
 }
 
 /**
@@ -89,6 +92,7 @@ class Assistant(
             when (call.name()) {
                 START_TASK -> actions.startTask(arg("repo"), arg("request"))
                 REPLY_TO_TASK -> actions.replyToTask(arg("task_id"), arg("text"))
+                ADD_REPO -> actions.addRepo(arg("name"))
                 else -> throw IllegalArgumentException("Unknown tool ${call.name()}")
             }
         }.fold({ it to false }, { (it.message ?: "That didn't work.") to true })
@@ -103,6 +107,7 @@ class Assistant(
         .system(SYSTEM + "\n\nCurrent state of the app:\n" + actions.context())
         .addTool(startTaskTool)
         .addTool(replyTool)
+        .addTool(addRepoTool)
         .messages(history.toList())
         .build()
 
@@ -129,6 +134,7 @@ class Assistant(
         private const val MAX_HISTORY = 30
         private const val START_TASK = "start_coding_task"
         private const val REPLY_TO_TASK = "reply_to_task"
+        private const val ADD_REPO = "add_repo"
 
         // List price for claude-opus-5-5, US dollars per million tokens.
         private const val INPUT_PER_MTOK = 4.0
@@ -141,6 +147,8 @@ class Assistant(
             You can also start coding tasks in the driver's GitHub repos and reply to running tasks with the tools.
             Only start a task when the driver clearly asks for one, and say back in one sentence what you started.
             If the repo is unclear, ask which one, naming at most three.
+            When the driver asks to add a repo, call add_repo with the name as they said it, then say which repo
+            was added. If it didn't work, read back the reason briefly.
         """.trimIndent()
 
         private val startTaskTool = Tool.builder()
@@ -171,6 +179,21 @@ class Assistant(
                             .build(),
                     )
                     .required(listOf("task_id", "text"))
+                    .build(),
+            )
+            .build()
+
+        private val addRepoTool = Tool.builder()
+            .name(ADD_REPO)
+            .description("Save one of the driver's GitHub repos so tasks can use it. Finds it among the repos their token can push to.")
+            .inputSchema(
+                Tool.InputSchema.builder()
+                    .properties(
+                        Tool.InputSchema.Properties.builder()
+                            .putAdditionalProperty("name", stringProp("The repo as the driver said it: owner/name, or just the name."))
+                            .build(),
+                    )
+                    .required(listOf("name"))
                     .build(),
             )
             .build()

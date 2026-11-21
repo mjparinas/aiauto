@@ -14,6 +14,16 @@ class CoreTest {
         assertNull(RepoRef.parse("owner/.."))
     }
 
+    @Test fun matchesSpokenRepoNames() {
+        val mine = listOf(RepoRef("mjparinas", "aiauto"), RepoRef("mjparinas", "my-site"), RepoRef("other", "my_site"))
+        assertEquals(listOf(mine[0]), RepoRef.matchSpoken("AI auto", mine))
+        assertEquals(listOf(mine[0]), RepoRef.matchSpoken("mjparinas/aiauto", mine))
+        assertEquals(listOf(mine[1]), RepoRef.matchSpoken("mjparinas slash my site", mine))
+        assertEquals(mine.drop(1), RepoRef.matchSpoken("my site", mine))
+        assertTrue(RepoRef.matchSpoken("nothing", mine).isEmpty())
+        assertTrue(RepoRef.matchSpoken("  ", mine).isEmpty())
+    }
+
     @Test fun cleansMarkdownForSpeech() {
         val text = "## Done\n- Updated **README** with `make test`\n```kotlin\nfun x() {}\n```\nSee [PR](https://x)."
         assertEquals("Done Updated README with make test See PR.", SpokenStatus.clean(text))
