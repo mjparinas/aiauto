@@ -106,7 +106,7 @@ fun TaskScreen(
                                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             )
                             Text(
-                                task.repo.fullName,
+                                task.repo.name,
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
