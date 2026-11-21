@@ -18,11 +18,84 @@ data class PullRequest(
     val state: String = "open",
     val title: String = "",
     val merged: Boolean = false,
+    val draft: Boolean = false,
+    /** Null while GitHub is still working it out, and always null in list results. */
+    val mergeable: Boolean? = null,
+    /** "dirty" means there are merge conflicts. */
+    @SerialName("mergeable_state") val mergeableState: String? = null,
+    @SerialName("node_id") val nodeId: String = "",
+    val head: Head = Head(),
+    @SerialName("auto_merge") val autoMerge: kotlinx.serialization.json.JsonElement? = null,
+    @SerialName("merged_at") val mergedAt: String? = null,
+    @SerialName("merge_commit_sha") val mergeCommitSha: String? = null,
+) {
+    @Serializable
+    data class Head(val sha: String = "", val ref: String = "")
+
+    val prState: PrState get() = when {
+        merged -> PrState.Merged
+        state == "closed" -> PrState.Closed
+        else -> PrState.Open
+    }
+
+    /** True when GitHub has worked out that it conflicts with the base branch, null while it's still checking. */
+    val hasConflicts: Boolean? get() = when {
+        mergeableState == "dirty" -> true
+        mergeable == null -> null
+        else -> mergeable == false
+    }
+
+    val hasGitHubAutoMerge: Boolean get() = autoMerge != null && autoMerge !is kotlinx.serialization.json.JsonNull
+}
+
+/** The newest commit on a branch. */
+data class CommitInfo(val sha: String, val message: String, val author: String, val timeMillis: Long?)
+
+/** One open pull request with its checks, for the project view. */
+data class PullStatus(val pull: PullRequest, val checks: ChecksSummary)
+
+/** A repo at a glance: what landed last, whether its main branch is green, and what's waiting for review. */
+data class RepoStatus(
+    val repo: RepoRef,
+    val latest: CommitInfo?,
+    val branchChecks: ChecksSummary,
+    val pulls: List<PullStatus>,
 )
 
-/** The few GitHub REST calls the app needs, authenticated with the user's token. */
-class GitHub(private val token: String, private val http: OkHttpClient = OkHttpClient()) {
-    private val json = Json { ignoreUnknownKeys = true }
+/** How a merge attempt went. */
+sealed interface MergeResult {
+    data object Merged : MergeResult
+    /** GitHub's auto-merge is on; GitHub merges once the required checks pass. */
+    data object AutoMergeOn : MergeResult
+    data class Refused(val reason: String) : MergeResult
+}
+
+/** The few GitHub REST calls the app needs, authenticated with the user's token. Open so tests can fake it. */
+open class GitHub(private val token: String, private val http: OkHttpClient = OkHttpClient()) {
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+
+    @Serializable
+    private data class CheckRuns(@SerialName("check_runs") val checkRuns: List<CheckRun> = emptyList()) {
+        @Serializable data class CheckRun(val name: String = "", val status: String = "", val conclusion: String? = null)
+    }
+
+    @Serializable
+    private data class CombinedStatus(
+        val state: String = "",
+        @SerialName("total_count") val totalCount: Int = 0,
+        val statuses: List<Item> = emptyList(),
+    ) {
+        @Serializable data class Item(val context: String = "", val state: String = "")
+    }
+
+    @Serializable
+    private data class CommitJson(val sha: String, val commit: Inner) {
+        @Serializable data class Inner(val message: String = "", val author: Author? = null)
+        @Serializable data class Author(val name: String = "", val date: String? = null)
+    }
+
+    @Serializable
+    private data class MergeBody(@SerialName("merge_method") val mergeMethod: String)
 
     @Serializable
     private data class RepoJson(
@@ -54,24 +127,157 @@ class GitHub(private val token: String, private val http: OkHttpClient = OkHttpC
             .filter { it.permissions?.push != false }
             .map { it.toRef() }
 
-    fun branchExists(repo: RepoRef, branch: String): Boolean = try {
+    open fun branchExists(repo: RepoRef, branch: String): Boolean = try {
         get("/repos/${repo.fullName}/branches/$branch")
         true
     } catch (e: GitHubException) {
         if (e.code == 404) false else throw e
     }
 
-    fun findPull(repo: RepoRef, branch: String): PullRequest? =
+    open fun findPull(repo: RepoRef, branch: String): PullRequest? =
         json.decodeFromString<List<PullRequest>>(get("/repos/${repo.fullName}/pulls?state=all&head=${repo.owner}:$branch"))
             .firstOrNull()
 
-    fun openPull(repo: RepoRef, branch: String, title: String, body: String): PullRequest {
+    open fun openPull(repo: RepoRef, branch: String, title: String, body: String): PullRequest {
         val payload = json.encodeToString(NewPull.serializer(), NewPull(title, branch, repo.defaultBranch, body))
         return json.decodeFromString(send("POST", "/repos/${repo.fullName}/pulls", payload))
     }
 
-    fun pull(repo: RepoRef, number: Int): PullRequest =
+    @Serializable
+    private data class TagJson(val name: String)
+
+    @Serializable
+    private data class NewRelease(
+        @SerialName("tag_name") val tagName: String,
+        @SerialName("target_commitish") val target: String,
+        val name: String,
+        @SerialName("generate_release_notes") val generateNotes: Boolean = true,
+    )
+
+    @Serializable
+    private data class ReleaseJson(@SerialName("tag_name") val tagName: String)
+
+    open fun tags(repo: RepoRef): List<String> =
+        json.decodeFromString<List<TagJson>>(get("/repos/${repo.fullName}/tags?per_page=100")).map { it.name }
+
+    /** Publishes a release, creating [tag] at [target] with GitHub's generated notes. Returns the tag. */
+    open fun createRelease(repo: RepoRef, tag: String, target: String): String {
+        val payload = json.encodeToString(NewRelease.serializer(), NewRelease(tag, target, tag))
+        return json.decodeFromString<ReleaseJson>(send("POST", "/repos/${repo.fullName}/releases", payload)).tagName
+    }
+
+    open fun pull(repo: RepoRef, number: Int): PullRequest =
         json.decodeFromString(get("/repos/${repo.fullName}/pulls/$number"))
+
+    open fun openPulls(repo: RepoRef, limit: Int = 10): List<PullRequest> =
+        json.decodeFromString(get("/repos/${repo.fullName}/pulls?state=open&sort=updated&direction=desc&per_page=$limit"))
+
+    /** The newest commit on [branch], or null when the branch is empty. */
+    open fun latestCommit(repo: RepoRef, branch: String = repo.defaultBranch): CommitInfo? = try {
+        val c = json.decodeFromString<CommitJson>(get("/repos/${repo.fullName}/commits/$branch"))
+        CommitInfo(
+            sha = c.sha,
+            message = c.commit.message.lineSequence().firstOrNull().orEmpty().trim(),
+            author = c.commit.author?.name.orEmpty(),
+            timeMillis = c.commit.author?.date?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() },
+        )
+    } catch (e: GitHubException) {
+        if (e.code == 404 || e.code == 409) null else throw e
+    }
+
+    /**
+     * Combines check runs (GitHub Actions and apps) with commit statuses for [sha].
+     * A token without permission to read one of them just leaves that source out; if it can read neither, the result is [Checks.Unknown].
+     */
+    open fun checks(repo: RepoRef, sha: String): ChecksSummary {
+        var readable = 0
+        val pending = mutableListOf<String>()
+        val failing = mutableListOf<String>()
+        var passing = 0
+        try {
+            val runs = json.decodeFromString<CheckRuns>(get("/repos/${repo.fullName}/commits/$sha/check-runs?per_page=100")).checkRuns
+            readable++
+            runs.forEach { run ->
+                when {
+                    run.status != "completed" -> pending += run.name
+                    run.conclusion in OK_CONCLUSIONS -> passing++
+                    else -> failing += run.name
+                }
+            }
+        } catch (e: GitHubException) {
+            if (e.code != 403 && e.code != 404) throw e
+        }
+        try {
+            val combined = json.decodeFromString<CombinedStatus>(get("/repos/${repo.fullName}/commits/$sha/status"))
+            readable++
+            combined.statuses.forEach { st ->
+                when (st.state) {
+                    "success" -> passing++
+                    "pending" -> pending += st.context
+                    else -> failing += st.context
+                }
+            }
+        } catch (e: GitHubException) {
+            if (e.code != 403 && e.code != 404) throw e
+        }
+        val total = passing + pending.size + failing.size
+        val state = when {
+            readable == 0 -> Checks.Unknown
+            failing.isNotEmpty() -> Checks.Failing
+            pending.isNotEmpty() -> Checks.Pending
+            total > 0 -> Checks.Passing
+            else -> Checks.None
+        }
+        return ChecksSummary(state, failing.distinct(), total)
+    }
+
+    /** Everything the project view shows for [repo]. */
+    open fun status(repo: RepoRef, maxPulls: Int = 6): RepoStatus {
+        val latest = latestCommit(repo)
+        val branchChecks = latest?.let { checks(repo, it.sha) } ?: ChecksSummary(Checks.None)
+        val pulls = openPulls(repo, maxPulls).map { PullStatus(it, checks(repo, it.head.sha)) }
+        return RepoStatus(repo, latest, branchChecks, pulls)
+    }
+
+    /** Merges pull request [number], trying squash first, then a merge commit, then rebase, whichever the repo allows. */
+    open fun merge(repo: RepoRef, number: Int): MergeResult {
+        var lastRefusal = "GitHub wouldn't merge it."
+        for (method in listOf("squash", "merge", "rebase")) {
+            try {
+                send("PUT", "/repos/${repo.fullName}/pulls/$number/merge", json.encodeToString(MergeBody.serializer(), MergeBody(method)))
+                return MergeResult.Merged
+            } catch (e: GitHubException) {
+                val message = e.message.orEmpty().removePrefix("GitHub: ")
+                when {
+                    // This merge method is turned off for the repo; try the next one.
+                    e.code == 405 && "not allowed" in message.lowercase() -> lastRefusal = message
+                    e.code == 405 || e.code == 409 || e.code == 422 -> return MergeResult.Refused(message.ifBlank { "GitHub can't merge it right now." })
+                    else -> throw e
+                }
+            }
+        }
+        return MergeResult.Refused(lastRefusal)
+    }
+
+    /**
+     * Turns on GitHub's own auto-merge, so GitHub merges once required checks pass, even with the phone off.
+     * Returns false when the repo doesn't allow it or the pull request has no required checks to wait for.
+     */
+    open fun enableAutoMerge(pull: PullRequest): Boolean {
+        if (pull.nodeId.isEmpty()) return false
+        val query = "mutation(\$id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: \$id, mergeMethod: SQUASH}) { clientMutationId } }"
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("query", kotlinx.serialization.json.JsonPrimitive(query))
+            put("variables", kotlinx.serialization.json.buildJsonObject { put("id", kotlinx.serialization.json.JsonPrimitive(pull.nodeId)) })
+        }.toString()
+        val response = try {
+            send("POST", "/graphql", body)
+        } catch (e: GitHubException) {
+            if (e.code == 401 || e.code >= 500) throw e
+            return false
+        }
+        return !response.contains("\"errors\"")
+    }
 
     private fun get(path: String) = send("GET", path, null)
 
@@ -92,5 +298,9 @@ class GitHub(private val token: String, private val http: OkHttpClient = OkHttpC
             }
             return text
         }
+    }
+
+    private companion object {
+        val OK_CONCLUSIONS = setOf("success", "neutral", "skipped")
     }
 }

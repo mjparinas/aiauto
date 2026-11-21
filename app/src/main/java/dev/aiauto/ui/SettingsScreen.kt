@@ -1,6 +1,21 @@
 package dev.aiauto.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,9 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +60,16 @@ data class SettingsState(
     val hasGithubToken: Boolean,
     val repos: List<RepoRef>,
     val readAloud: Boolean,
+    val quietMode: Boolean,
+    val autoMerge: Boolean,
+    val autoFixChecks: Boolean,
+    val autoFixConflicts: Boolean,
+    val autoRelease: Boolean,
+    val dailyLimitUsd: Double?,
+    val spentTodayUsd: Double,
+    val version: String,
+    val themeMode: ThemeMode,
+    val accent: Accent,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -55,9 +81,18 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSaveKeys: (anthropic: String, github: String) -> Unit,
     onAddRepo: (String) -> Unit,
-    onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
+    onQuietMode: (Boolean) -> Unit,
+    onAutoMerge: (Boolean) -> Unit,
+    onAutoFixChecks: (Boolean) -> Unit,
+    onAutoFixConflicts: (Boolean) -> Unit,
+    onAutoRelease: (Boolean) -> Unit,
+    onThemeMode: (ThemeMode) -> Unit,
+    onAccent: (Accent) -> Unit,
+    onDailyLimit: (Double?) -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
+    var limitText by remember { mutableStateOf(state.dailyLimitUsd?.let { "%.2f".format(java.util.Locale.US, it).removeSuffix(".00") }.orEmpty()) }
     var anthropic by remember { mutableStateOf("") }
     var github by remember { mutableStateOf("") }
     var repoText by remember { mutableStateOf("") }
@@ -73,7 +108,7 @@ fun SettingsScreen(
         },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Section("Accounts")
@@ -89,7 +124,7 @@ fun SettingsScreen(
                 saved = state.hasGithubToken,
                 value = github,
                 onChange = { github = it },
-                help = "A fine-grained token with Contents and Pull requests set to read and write on your repos.",
+                help = "A fine-grained token with Contents and Pull requests set to read and write, and Checks and Commit statuses set to read, on your repos.",
             )
             Button(
                 onClick = { onSaveKeys(anthropic, github); anthropic = ""; github = "" },
@@ -99,16 +134,14 @@ fun SettingsScreen(
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
             Section("Repositories")
             state.repos.forEach { repo ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(repo.fullName, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onRemoveRepo(repo) }) { Icon(Icons.Rounded.Close, "Remove") }
-                }
+                Text(repo.fullName, style = MaterialTheme.typography.bodyLarge)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = repoText,
                     onValueChange = { repoText = it },
                     modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.large,
                     singleLine = true,
                     label = { Text("owner/repo") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -132,6 +165,113 @@ fun SettingsScreen(
                 }
                 Switch(checked = state.readAloud, onCheckedChange = onReadAloud)
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Quiet mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Only tells you the result of each request, not every step along the way.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.quietMode, onCheckedChange = onQuietMode)
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("Pull requests")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Merge when checks pass", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Turns on GitHub auto-merge when the repo allows it. Otherwise the app merges once every check is green. Failing checks are never merged.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoMerge, onCheckedChange = onAutoMerge)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Fix merge conflicts automatically", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When a pull request conflicts with the main branch, Claude merges it in, resolves the conflicts and pushes, without asking first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoFixConflicts, onCheckedChange = onAutoFixConflicts)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Fix failing checks automatically", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When tests, the build or any other CI check fails, Claude fixes it and pushes, without asking first. Up to three tries per task before it asks you.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoFixChecks, onCheckedChange = onAutoFixChecks)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Release when a PR is merged", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When a pull request from this app is merged, publishes a GitHub release with the next patch version, like v1.2.3 to v1.2.4.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoRelease, onCheckedChange = onAutoRelease)
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("Appearance")
+            Text("Mode", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = state.themeMode == mode,
+                        onClick = { onThemeMode(mode) },
+                        label = { Text(mode.label) },
+                    )
+                }
+            }
+            Text("Accent color", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Accent.entries.forEach { accent ->
+                    AccentSwatch(accent, selected = state.accent == accent, onClick = { onAccent(accent) })
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("Spending")
+            Text(
+                "Spent today: ${dev.aiauto.core.SpokenStatus.money(state.spentTodayUsd)}" +
+                    (state.dailyLimitUsd?.let { " of ${dev.aiauto.core.SpokenStatus.money(it)}" } ?: ", no limit"),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = limitText,
+                    onValueChange = { limitText = it.filter { c -> c.isDigit() || c == '.' } },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Daily limit in US dollars") },
+                    placeholder = { Text("Blank for no limit") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                OutlinedButton(onClick = { onDailyLimit(limitText.toDoubleOrNull()?.takeIf { it > 0 }) }) { Text("Set") }
+            }
+            Text(
+                "Claude stops when today's total reaches the limit, counted at list price from what each session reports.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("About")
+            Text("Version ${state.version}", style = MaterialTheme.typography.bodyLarge)
+            OutlinedButton(onClick = onCheckUpdate, enabled = !state.busy) { Text("Check for updates") }
 
             state.message?.let {
                 Spacer(Modifier.height(4.dp))
@@ -146,12 +286,31 @@ private fun Section(title: String) =
     Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 @Composable
+private fun AccentSwatch(accent: Accent, selected: Boolean, onClick: () -> Unit) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val color = if (dark) accent.dark else accent.light
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(color)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onBackground, CircleShape) else Modifier)
+            .clickable(onClickLabel = accent.label, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = accent.label; this.selected = selected },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Icon(Icons.Rounded.Check, null, tint = if (dark) Color(0xFF1A1714) else Color.White, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
 private fun SecretField(label: String, saved: Boolean, value: String, onChange: (String) -> Unit, help: String) {
     Column(Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
             modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
             singleLine = true,
             label = { Text(if (saved) "$label (saved)" else label) },
             placeholder = { if (saved) Text("Leave blank to keep the saved one") },

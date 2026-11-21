@@ -15,15 +15,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// A warm, paper-and-clay palette: calm enough to glance at, with one accent for actions.
-val Clay = Color(0xFFC96F4A)
-private val ClayDark = Color(0xFFDB8B66)
+/** Light, dark, or follow the phone. */
+enum class ThemeMode(val label: String) { System("System"), Light("Light"), Dark("Dark") }
 
-private val Light = lightColorScheme(
-    primary = Clay,
+/** The accent used for actions and highlights, with matching containers for light and dark. */
+enum class Accent(
+    val label: String,
+    val light: Color,
+    val lightContainer: Color,
+    val onLightContainer: Color,
+    val dark: Color,
+    val darkContainer: Color,
+    val onDarkContainer: Color,
+) {
+    Clay("Clay", Color(0xFFC96F4A), Color(0xFFF3DED3), Color(0xFF5A2A16), Color(0xFFDB8B66), Color(0xFF4A2A1C), Color(0xFFF6DCCF)),
+    Ocean("Ocean", Color(0xFF3A6EA5), Color(0xFFD6E4F3), Color(0xFF14304F), Color(0xFF8DB4E2), Color(0xFF1F3550), Color(0xFFD6E4F3)),
+    Forest("Forest", Color(0xFF4F7A55), Color(0xFFDCE9D9), Color(0xFF1D3A22), Color(0xFF93BE96), Color(0xFF263D29), Color(0xFFDCE9D9)),
+    Plum("Plum", Color(0xFF8A4F7D), Color(0xFFF0DCEB), Color(0xFF3F1838), Color(0xFFCB9BC0), Color(0xFF452A40), Color(0xFFF0DCEB)),
+    Slate("Slate", Color(0xFF5B6572), Color(0xFFE1E4E8), Color(0xFF222831), Color(0xFFA9B3BF), Color(0xFF333A43), Color(0xFFE1E4E8)),
+}
+
+// A warm, paper-and-clay base: calm enough to glance at, with one accent for actions.
+private fun lightScheme(accent: Accent) = lightColorScheme(
+    primary = accent.light,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFF3DED3),
-    onPrimaryContainer = Color(0xFF5A2A16),
+    primaryContainer = accent.lightContainer,
+    onPrimaryContainer = accent.onLightContainer,
     background = Color(0xFFF6F2EA),
     onBackground = Color(0xFF2A2825),
     surface = Color(0xFFFCFAF6),
@@ -34,11 +51,11 @@ private val Light = lightColorScheme(
     error = Color(0xFFB3261E),
 )
 
-private val Dark = darkColorScheme(
-    primary = ClayDark,
-    onPrimary = Color(0xFF2A1308),
-    primaryContainer = Color(0xFF4A2A1C),
-    onPrimaryContainer = Color(0xFFF6DCCF),
+private fun darkScheme(accent: Accent) = darkColorScheme(
+    primary = accent.dark,
+    onPrimary = Color(0xFF1A1714),
+    primaryContainer = accent.darkContainer,
+    onPrimaryContainer = accent.onDarkContainer,
     background = Color(0xFF1E1D1B),
     onBackground = Color(0xFFECE8E0),
     surface = Color(0xFF282724),
@@ -67,9 +84,18 @@ private val AppShapes = Shapes(
 )
 
 @Composable
-fun AiAutoTheme(content: @Composable () -> Unit) {
+fun AiAutoTheme(
+    mode: ThemeMode = ThemeMode.System,
+    accent: Accent = Accent.Clay,
+    content: @Composable () -> Unit,
+) {
+    val dark = when (mode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
+        colorScheme = if (dark) darkScheme(accent) else lightScheme(accent),
         typography = AppType,
         shapes = AppShapes,
         content = content,

@@ -31,7 +31,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
     private val claude = Person.Builder()
         .setName("Claude")
         .setKey("claude")
-        .setIcon(IconCompat.createWithResource(context, R.drawable.ic_spark))
+        .setIcon(IconCompat.createWithResource(context, R.drawable.ic_glyph))
         .build()
 
     fun createChannels() {
@@ -44,6 +44,20 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         if (message.speaker == Who.You) return
         post(task)
         if (settings.readAloudInCar && speaker.inCar) speaker.speak(message.text)
+    }
+
+    private var lastProgress: String? = null
+    private var lastProgressMillis = 0L
+
+    /** Reads short progress notes like "Building or testing" aloud, without repeating them too often. */
+    @Synchronized
+    fun onProgress(text: String) {
+        if (!settings.readAloudInCar || !speaker.inCar) return
+        val now = System.currentTimeMillis()
+        if (text == lastProgress || now - lastProgressMillis < PROGRESS_GAP_MILLIS) return
+        lastProgress = text
+        lastProgressMillis = now
+        speaker.speak(text)
     }
 
     /** Shows (or refreshes) the task's conversation so it pops up on the car screen. */
@@ -65,12 +79,42 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         notify(newTaskId(repo), style, replyTo = NEW_PREFIX + repo.fullName)
     }
 
+    private val chat = ArrayDeque<Triple<Boolean, String, Long>>()
+
+    /**
+     * The "Talk to Claude" conversation for Android Auto's messaging view. Replying to it by voice asks
+     * Claude directly, and the answer comes back in the same conversation and is read aloud. This works
+     * even when the car only shows Cruise Control as a messaging app.
+     */
+    @Synchronized
+    fun postChat(fromClaude: String? = null, fromYou: String? = null) {
+        val now = System.currentTimeMillis()
+        fromYou?.let { chat.addLast(Triple(false, it, now)) }
+        fromClaude?.let { chat.addLast(Triple(true, it, now)) }
+        while (chat.size > MAX_MESSAGES) chat.removeFirst()
+        if (chat.isEmpty()) chat.addLast(Triple(true, CHAT_HELLO, now))
+        val style = NotificationCompat.MessagingStyle(me)
+            .setConversationTitle("Talk to Claude")
+            .setGroupConversation(false)
+        chat.forEach { (isClaude, text, time) -> style.addMessage(text, time, if (isClaude) claude else me) }
+        notify(CHAT_ID, style, replyTo = CHAT_TARGET)
+    }
+
+    /** Starts the conversation over with a greeting, e.g. each time the phone connects to the car. */
+    @Synchronized
+    fun startChat() {
+        chat.clear()
+        postChat(fromClaude = CHAT_HELLO)
+    }
+
+    fun clearChat() = manager.cancel(CHAT_ID)
+
     fun clearNewTask(repo: RepoRef) = manager.cancel(newTaskId(repo))
 
     fun clear(taskId: String) = manager.cancel(taskId.hashCode())
 
     fun workingNotification() = NotificationCompat.Builder(context, CH_WORKING)
-        .setSmallIcon(R.drawable.ic_spark)
+        .setSmallIcon(R.drawable.ic_glyph)
         .setContentTitle("Claude is working")
         .setContentText("Updates will arrive as messages.")
         .setOngoing(true)
@@ -87,7 +131,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             Intent(context, ReplyReceiver::class.java).setAction(ReplyReceiver.ACTION_REPLY).putExtra(ReplyReceiver.EXTRA_TARGET, replyTo),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
-        val reply = NotificationCompat.Action.Builder(R.drawable.ic_spark, "Reply", replyIntent)
+        val reply = NotificationCompat.Action.Builder(R.drawable.ic_glyph, "Reply", replyIntent)
             .addRemoteInput(RemoteInput.Builder(ReplyReceiver.KEY_TEXT).setLabel("Tell Claude").build())
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .setShowsUserInterface(false)
@@ -97,22 +141,23 @@ class Notifier(private val context: Context, private val settings: Settings, pri
             Intent(context, ReplyReceiver::class.java).setAction(ReplyReceiver.ACTION_READ).putExtra(ReplyReceiver.EXTRA_TARGET, replyTo),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val markRead = NotificationCompat.Action.Builder(R.drawable.ic_spark, "Mark as read", readIntent)
+        val markRead = NotificationCompat.Action.Builder(R.drawable.ic_glyph, "Mark as read", readIntent)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .setShowsUserInterface(false)
             .build()
 
         val notification = NotificationCompat.Builder(context, CH_TASKS)
-            .setSmallIcon(R.drawable.ic_spark)
+            .setSmallIcon(R.drawable.ic_glyph)
             .setColor(0xFFC96F4A.toInt())
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setOnlyAlertOnce(false)
             .addAction(reply)
             .addInvisibleAction(markRead)
-            .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) }))
+            .setContentIntent(openApp(replyTo.takeUnless { it.startsWith(NEW_PREFIX) || it == CHAT_TARGET }))
             .build()
-        manager.notify(id, notification)
+        // Notifications can be blocked or throttled; that must never take a running task down with it.
+        runCatching { manager.notify(id, notification) }
     }
 
     private fun openApp(taskId: String?): PendingIntent = PendingIntent.getActivity(
@@ -129,6 +174,11 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         const val CH_WORKING = "working"
         const val WORKING_ID = 1
         const val NEW_PREFIX = "new:"
+        const val CHAT_TARGET = "chat"
+        private const val CHAT_ID = 2
+        private const val CHAT_HELLO = "Hi, it's Claude. Reply to this message and say anything. " +
+            "To skip the Send button, turn on Unknown sources in Android Auto and use Talk on the Cruise Control screen."
         private const val MAX_MESSAGES = 8
+        private const val PROGRESS_GAP_MILLIS = 15_000L
     }
 }

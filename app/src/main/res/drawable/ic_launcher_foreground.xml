@@ -1,6 +1,14 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#C96F4A"
-        android:pathData="M54,30 C55.6,43.4 64.6,52.4 78,54 C64.6,55.6 55.6,64.6 54,78 C52.4,64.6 43.4,55.6 30,54 C43.4,52.4 52.4,43.4 54,30 Z" />
+    <!-- Prompt sign: a road-sign ring holding a terminal prompt. Scaled to sit inside the adaptive-icon safe zone. -->
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.68" android:scaleY="0.68">
+        <path android:strokeColor="#C96F4A" android:strokeWidth="8"
+            android:pathData="M54,27 A27,27 0 1,1 54,81 A27,27 0 1,1 54,27 Z" />
+        <path android:strokeColor="#2A2825" android:strokeWidth="6"
+            android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M40,44 L50,54 L40,64" />
+        <path android:strokeColor="#2A2825" android:strokeWidth="6" android:strokeLineCap="round"
+            android:pathData="M56,65 L69,65" />
+    </group>
 </vector>

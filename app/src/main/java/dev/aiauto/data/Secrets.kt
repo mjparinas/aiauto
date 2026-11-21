@@ -40,10 +40,24 @@ class Secrets(context: Context) {
             prefs.edit().remove(name).apply()
             return
         }
+        val encrypted = runCatching { encrypt(value.trim()) }.getOrElse {
+            // The Keystore key can become unusable (for example after a lock screen reset). Start over with a new
+            // key; secrets saved with the old key can't be read anymore and need to be entered again.
+            resetKey()
+            encrypt(value.trim())
+        }
+        prefs.edit().putString(name, Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
+    }
+
+    private fun encrypt(value: String): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORM)
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val encrypted = cipher.iv + cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
-        prefs.edit().putString(name, Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
+        return cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun resetKey() {
+        runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) }
+        prefs.edit().clear().apply()
     }
 
     private fun key(): SecretKey {
