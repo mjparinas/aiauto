@@ -15,11 +15,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.aiauto.core.Failures
 import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
 import dev.aiauto.ui.AiAutoTheme
 import dev.aiauto.ui.HomeScreen
 import dev.aiauto.ui.NewTaskScreen
+import dev.aiauto.ui.ProjectsScreen
 import dev.aiauto.ui.SettingsScreen
 import dev.aiauto.ui.SettingsState
 import dev.aiauto.ui.TaskScreen
@@ -31,25 +33,47 @@ private sealed interface Screen {
     data object Home : Screen
     data object NewTask : Screen
     data object Settings : Screen
+    data object Projects : Screen
     data class Detail(val taskId: String) : Screen
 }
 
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf<Screen>(Screen.Home)
 
+    /**
+     * Asks once to lift battery limits. Without it, Android (Samsung especially) can stop the app soon after
+     * Android Auto disconnects, which stops Claude's running tasks.
+     */
+    @android.annotation.SuppressLint("BatteryLife")
+    private fun askToRunInBackground() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (TaskService.isUnrestricted(this) || prefs.getBoolean("asked_battery", false)) return
+        prefs.edit().putBoolean("asked_battery", true).apply()
+        runCatching {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(android.net.Uri.parse("package:$packageName")),
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        // The microphone is for speaking requests from the car screen.
+        val permissions = listOfNotNull(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS.takeIf { Build.VERSION.SDK_INT >= 33 })
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(permissions.toTypedArray())
+        askToRunInBackground()
         val g = graph
         screen = intent.taskTarget() ?: if (g.isConfigured) Screen.Home else Screen.Settings
 
         setContent {
             AiAutoTheme {
+                dev.aiauto.update.UpdateDialog((application as AiAutoApp).updater)
                 val tasks by g.tasks.tasks.collectAsStateWithLifecycle()
                 val repos by g.repos.repos.collectAsStateWithLifecycle()
+                val views by g.projects.repos.collectAsStateWithLifecycle()
+                var projectMessage by remember { mutableStateOf<String?>(null) }
                 val scope = rememberCoroutineScope()
                 var settings by remember { mutableStateOf(settingsState(repos)) }
 
@@ -57,16 +81,41 @@ class MainActivity : ComponentActivity() {
 
                 when (val s = screen) {
                     Screen.Home -> HomeScreen(
-                        tasks = tasks.filterNot { it.archived },
+                        tasks = tasks,
                         hasRepos = repos.isNotEmpty() && g.isConfigured,
                         onOpen = { screen = Screen.Detail(it.id) },
-                        onArchive = { g.tasks.setArchived(it.id, true) },
-                        onUnarchive = { g.tasks.setArchived(it.id, false) },
+                        onArchive = { g.engine.archive(it.id); g.notifier.clear(it.id) },
+                        onUnarchive = { g.engine.unarchive(it.id) },
                         onNew = { screen = Screen.NewTask },
                         onSettings = { screen = Screen.Settings },
+                        onProjects = {
+                            projectMessage = null
+                            g.projects.refreshAll(repos, maxAgeMillis = 30_000)
+                            screen = Screen.Projects
+                        },
+                        finishedCount = tasks.count { it.isFinished && !it.archived && !g.engine.isRunning(it.id) },
+                        onClearFinished = { tasks.filter { it.isFinished && !it.archived && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
+                        spentToday = g.settings.spentTodayUsd,
+                        dailyLimit = g.settings.dailyLimitUsd,
+                    )
+                    Screen.Projects -> ProjectsScreen(
+                        repos = repos,
+                        views = views,
+                        message = projectMessage,
+                        onBack = { screen = Screen.Home },
+                        onRefresh = { g.projects.refreshAll(repos) },
+                        onMerge = { repo, number ->
+                            projectMessage = "Merging #$number…"
+                            scope.launch {
+                                projectMessage = withContext(Dispatchers.IO) {
+                                    runCatching { g.mergePull(repo, number) }.getOrElse { "Couldn't merge pull request $number. ${Failures.describe(it)}" }
+                                }
+                            }
+                        },
                     )
                     Screen.NewTask -> NewTaskScreen(
                         repos = repos,
+                        lastUsed = tasks.maxByOrNull { it.createdMillis }?.repo,
                         onBack = { screen = Screen.Home },
                         onStart = { repo, text ->
                             val task = g.engine.start(repo, text)
@@ -77,7 +126,36 @@ class MainActivity : ComponentActivity() {
                     is Screen.Detail -> {
                         val task = tasks.firstOrNull { it.id == s.taskId }
                         if (task == null) screen = Screen.Home
-                        else TaskScreen(task, onBack = { screen = Screen.Home }) { text ->
+                        else TaskScreen(
+                            task,
+                            running = g.engine.isRunning(task.id) || task.status == dev.aiauto.core.TaskStatus.Working || task.status == dev.aiauto.core.TaskStatus.Starting,
+                            onBack = { screen = Screen.Home },
+                            onStop = { g.engine.stop(task.id) },
+                            onClear = {
+                                g.engine.clear(task.id)
+                                g.notifier.clear(task.id)
+                                screen = Screen.Home
+                            },
+                            onArchive = {
+                                g.engine.archive(task.id)
+                                g.notifier.clear(task.id)
+                                screen = Screen.Home
+                            },
+                            onUnarchive = { g.engine.unarchive(task.id) },
+                            onMerge = {
+                                android.widget.Toast.makeText(this, "Merging…", android.widget.Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching { g.engine.mergeNow(task.id) }.getOrElse { "Couldn't merge. ${Failures.describe(it)}" }
+                                    }
+                                    android.widget.Toast.makeText(this@MainActivity, result, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            onRetry = {
+                                g.engine.retry(task.id)
+                                TaskService.ensureRunning(this)
+                            },
+                        ) { text ->
                             g.engine.prompt(task.id, text)
                             TaskService.ensureRunning(this)
                         }
@@ -86,12 +164,16 @@ class MainActivity : ComponentActivity() {
                         state = settingsState(repos).copy(busy = settings.busy, message = settings.message),
                         onBack = { screen = Screen.Home },
                         onSaveKeys = { anthropic, github ->
-                            if (anthropic.isNotBlank()) {
-                                g.secrets.anthropicKey = anthropic
-                                g.settings.agentSetup = null // a new key means a new agent in that account
+                            val saved = runCatching {
+                                if (anthropic.isNotBlank()) {
+                                    g.secrets.anthropicKey = anthropic
+                                    g.settings.agentSetup = null // a new key means a new agent in that account
+                                }
+                                if (github.isNotBlank()) g.secrets.githubToken = github
                             }
-                            if (github.isNotBlank()) g.secrets.githubToken = github
-                            settings = settings.copy(message = "Saved.")
+                            settings = settings.copy(
+                                message = if (saved.isSuccess) "Saved." else "Couldn't save securely on this phone. Try again, or restart the app.",
+                            )
                         },
                         onAddRepo = { text ->
                             val parsed = RepoRef.parse(text)
@@ -105,17 +187,32 @@ class MainActivity : ComponentActivity() {
                                     result.onSuccess { g.repos.add(it) }
                                     settings = settings.copy(
                                         busy = false,
-                                        message = result.fold({ "Added ${it.fullName}." }, { it.message ?: "Couldn't reach that repo." }),
+                                        message = result.fold({ "Added ${it.fullName}." }, { Failures.describe(it) }),
                                     )
                                 }
                             }
                         },
                         onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
+                        onQuietMode = { g.settings.quietMode = it; settings = settings.copy(quietMode = it) },
+                        onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },
+                        onDailyLimit = {
+                            g.settings.dailyLimitUsd = it
+                            settings = settings.copy(
+                                dailyLimitUsd = it,
+                                message = it?.let { v -> "Daily limit set to ${dev.aiauto.core.SpokenStatus.money(v)}." } ?: "No daily limit.",
+                            )
+                        },
                     )
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Pull request state and checks change on GitHub while the app is closed.
+        graph.engine.refreshPullRequests()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -128,6 +225,10 @@ class MainActivity : ComponentActivity() {
         hasGithubToken = graph.secrets.githubToken != null,
         repos = repos,
         readAloud = graph.settings.readAloudInCar,
+        quietMode = graph.settings.quietMode,
+        autoMerge = graph.settings.autoMerge,
+        dailyLimitUsd = graph.settings.dailyLimitUsd,
+        spentTodayUsd = graph.settings.spentTodayUsd,
     )
 
     private fun Intent.taskTarget(): Screen? = getStringExtra(EXTRA_TASK)?.let { Screen.Detail(it) }

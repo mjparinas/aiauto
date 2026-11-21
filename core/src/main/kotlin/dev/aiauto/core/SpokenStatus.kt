@@ -45,4 +45,78 @@ object SpokenStatus {
         }
         return t
     }
+
+    /** "checks passing", "2 checks failing", … for a row or a sentence. */
+    fun checks(summary: ChecksSummary?): String = when (summary?.state) {
+        null -> "checks not loaded"
+        Checks.None -> "no checks"
+        Checks.Pending -> "checks running"
+        Checks.Passing -> "checks passing"
+        Checks.Failing -> if (summary.failing.size == 1) "${summary.failing[0]} failing" else "${summary.failing.size} checks failing"
+        Checks.Unknown -> "checks hidden from your token"
+    }
+
+    /** The pull request part of a task's status, e.g. "PR 5 merged" or "PR 5, checks running". */
+    fun pullRequest(task: Task): String? {
+        val number = task.prNumber ?: return null
+        return when (task.prState) {
+            PrState.Merged -> "PR $number merged"
+            PrState.Closed -> "PR $number closed"
+            else -> "PR $number, ${checks(task.checks)}"
+        }
+    }
+
+    fun money(usd: Double): String = when {
+        usd <= 0.0 -> "$0"
+        usd < 0.01 -> "under 1¢"
+        else -> "$" + "%.2f".format(java.util.Locale.US, usd)
+    }
+
+    /** A spoken summary of a repo for the car: main branch, last change, and open pull requests. */
+    fun forRepo(status: RepoStatus, nowMillis: Long = System.currentTimeMillis()): String = buildString {
+        append(status.repo.name).append(". ")
+        val latest = status.latest
+        if (latest == null) {
+            append("${status.repo.defaultBranch} has no commits yet. ")
+        } else {
+            append("${status.repo.defaultBranch.replaceFirstChar { it.uppercase() }} has ${checks(status.branchChecks)}. ")
+            append("Last change: ${clean(latest.message)}")
+            latest.timeMillis?.let { append(", ${ago(nowMillis - it)}") }
+            append(". ")
+        }
+        when (status.pulls.size) {
+            0 -> append("No open pull requests.")
+            1 -> append("One open pull request. ")
+            else -> append("${status.pulls.size} open pull requests. ")
+        }
+        status.pulls.take(4).forEach { p ->
+            append("Number ${p.pull.number}, ${clean(p.pull.title)}, ${if (p.pull.draft) "draft, " else ""}${checks(p.checks)}. ")
+        }
+    }.trim()
+
+    /** A spoken summary of one pull request. */
+    fun forPull(pull: PullRequest, checks: ChecksSummary?): String = buildString {
+        append("Pull request ${pull.number}, ${clean(pull.title)}. ")
+        when (pull.prState) {
+            PrState.Merged -> append("It's merged.")
+            PrState.Closed -> append("It's closed.")
+            PrState.Open -> {
+                append(checks(checks).replaceFirstChar { it.uppercase() }).append(". ")
+                if (checks?.state == Checks.Failing && checks.failing.size > 1) append("Failing: ${checks.failing.take(3).joinToString(", ")}. ")
+                if (pull.draft) append("It's a draft. ")
+                if (pull.hasGitHubAutoMerge) append("Auto-merge is on.")
+                else if (pull.mergeable == false) append("It has conflicts with the base branch.")
+            }
+        }
+    }.trim()
+
+    fun ago(millis: Long): String {
+        val minutes = millis / 60_000
+        return when {
+            minutes < 1 -> "just now"
+            minutes < 60 -> "$minutes minute${if (minutes == 1L) "" else "s"} ago"
+            minutes < 48 * 60 -> (minutes / 60).let { "$it hour${if (it == 1L) "" else "s"} ago" }
+            else -> "${minutes / (24 * 60)} days ago"
+        }
+    }
 }
