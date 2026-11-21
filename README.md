@@ -23,14 +23,17 @@ as messages that the car reads aloud.
   - Each task is posted as a messaging notification. Android Auto reads these aloud and accepts voice replies.
 
 Tap **Talk** on the car screen and say anything. Claude (Opus 5.5, low effort for quick answers) replies out loud
-through the car speakers, and can start a coding task in one of your saved repos or answer a running task when you
+through the car speakers, then listens for your reply, which is sent as soon as you stop talking. Say nothing to end
+the conversation. Claude can also start a coding task in one of your saved repos or answer a running task when you
 ask it to. You can also add a repo by voice: say something like "add my repo aiauto" and Claude finds it among the
 repos your GitHub token can push to and saves it. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
 
 If the car only shows AIAuto's messaging view ("No new messages during this drive"), Android Auto is hiding the
 app screen, usually because **Unknown sources** is off (see setup below). You can still talk to Claude there: each
 time the phone connects to the car, a **Talk to Claude** conversation appears. Tap it, reply by voice, and Claude's
-answer arrives in the same conversation and is read aloud.
+answer arrives in the same conversation and is read aloud. In this view Android Auto asks you to confirm with a
+**Send** button after you stop talking; apps can't turn that off. The app screen doesn't ask: **Talk** and **Reply**
+send your words as soon as you stop speaking, so turn on **Unknown sources** to talk without pressing anything.
 
 Voice input also works inside tasks: open **Tasks**, then tap **Talk to Claude** at the top of the list (or **New task**),
 pick a repo if you have more than one, and speak your request. To answer Claude, open a task and tap **Reply**, then

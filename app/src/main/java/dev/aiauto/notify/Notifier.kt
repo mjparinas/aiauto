@@ -176,7 +176,8 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         const val NEW_PREFIX = "new:"
         const val CHAT_TARGET = "chat"
         private const val CHAT_ID = 2
-        private const val CHAT_HELLO = "Hi, it's Claude. Reply to this message and say anything."
+        private const val CHAT_HELLO = "Hi, it's Claude. Reply to this message and say anything. " +
+            "To skip the Send button, turn on Unknown sources in Android Auto and use Talk on the AIAuto screen."
         private const val MAX_MESSAGES = 8
         private const val PROGRESS_GAP_MILLIS = 15_000L
     }
