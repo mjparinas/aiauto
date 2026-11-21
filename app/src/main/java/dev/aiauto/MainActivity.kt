@@ -91,8 +91,8 @@ class MainActivity : ComponentActivity() {
                             g.projects.refreshAll(repos, maxAgeMillis = 30_000)
                             screen = Screen.Projects
                         },
-                        finishedCount = tasks.count { it.isFinished && !g.engine.isRunning(it.id) },
-                        onClearFinished = { tasks.filter { it.isFinished && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
+                        finishedCount = tasks.count { it.isFinished && !it.archived && !g.engine.isRunning(it.id) },
+                        onClearFinished = { tasks.filter { it.isFinished && !it.archived && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
                         spentToday = g.settings.spentTodayUsd,
                         dailyLimit = g.settings.dailyLimitUsd,
                     )
@@ -133,6 +133,12 @@ class MainActivity : ComponentActivity() {
                                 g.notifier.clear(task.id)
                                 screen = Screen.Home
                             },
+                            onArchive = {
+                                g.engine.archive(task.id)
+                                g.notifier.clear(task.id)
+                                screen = Screen.Home
+                            },
+                            onUnarchive = { g.engine.unarchive(task.id) },
                             onMerge = { scope.launch(Dispatchers.IO) { runCatching { g.engine.mergeNow(task.id) } } },
                             onRetry = {
                                 g.engine.retry(task.id)

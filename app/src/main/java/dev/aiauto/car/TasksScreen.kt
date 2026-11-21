@@ -38,7 +38,8 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
 
     override fun onGetTemplate(): Template {
         val items = ItemList.Builder()
-        val all = g.tasks.tasks.value
+        // Archived tasks live on the phone's Archived tab, not in the car.
+        val all = g.tasks.tasks.value.filter { !it.archived }
         val finished = all.count { it.isFinished && !g.engine.isRunning(it.id) }
         val canTalk = g.isConfigured && g.repos.repos.value.isNotEmpty()
         // Car lists hold about six rows; keep one for "Talk to Claude" and one for "Clear finished" when shown.
@@ -71,7 +72,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
                     .setTitle("Clear $finished finished task${if (finished == 1) "" else "s"}")
                     .addText("Stopped tasks, and done ones with no open pull request")
                     .setOnClickListener {
-                        g.tasks.all().filter { it.isFinished && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }
+                        all.filter { it.isFinished && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }
                         val cleared = g.engine.clearFinished()
                         CarToast.makeText(carContext, "Cleared $cleared", CarToast.LENGTH_SHORT).show()
                     }

@@ -60,7 +60,7 @@ class Graph(context: Context) {
         actions = object : AssistantActions {
             override fun context(): String {
                 val repoList = repos.repos.value.joinToString(", ") { it.fullName }.ifEmpty { "none" }
-                val recent = tasks.all().take(6).joinToString("\n") { t ->
+                val recent = tasks.all().filter { !it.archived }.take(6).joinToString("\n") { t ->
                     "- task ${t.id} in ${t.repo.fullName}: ${t.title} (${dev.aiauto.car.TasksScreen.statusLabel(t)})" +
                         (t.lastMessage?.let { ". Last said: ${it.text.take(300)}" } ?: "")
                 }.ifEmpty { "none" }

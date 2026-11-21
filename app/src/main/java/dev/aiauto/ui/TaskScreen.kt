@@ -19,7 +19,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -65,6 +67,8 @@ fun TaskScreen(
     onRetry: () -> Unit,
     onStop: () -> Unit,
     onClear: () -> Unit,
+    onArchive: () -> Unit,
+    onUnarchive: () -> Unit,
     onMerge: () -> Unit,
     onSend: (String) -> Unit,
 ) {
@@ -104,6 +108,11 @@ fun TaskScreen(
                     StatusPill(task.status, Modifier.padding(end = 4.dp), interrupted = task.interrupted)
                     if (running) {
                         IconButton(onClick = onStop) { Icon(Icons.Rounded.StopCircle, "Stop") }
+                    }
+                    if (task.archived) {
+                        IconButton(onClick = onUnarchive) { Icon(Icons.Rounded.Unarchive, "Unarchive") }
+                    } else {
+                        IconButton(onClick = onArchive) { Icon(Icons.Rounded.Archive, "Archive") }
                     }
                     IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteOutline, "Clear task") }
                 },

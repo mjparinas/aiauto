@@ -86,6 +86,8 @@ data class Task(
     val prOpenedMillis: Long? = null,
     /** What this task's Claude session has cost so far, in US dollars at list price. */
     val costUsd: Double = 0.0,
+    /** Put away by the user: shown on the Archived tab instead of the main list. */
+    val archived: Boolean = false,
 ) {
     /** A pull request exists and hasn't been merged or closed yet. */
     val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open
