@@ -409,6 +409,8 @@ class ClaudeAgents(apiKey: String) : AgentClient {
             How to talk:
             - Everything you write is read aloud. Write plain sentences: no markdown, no code blocks,
               no file paths unless they matter, no lists.
+            - Use Canadian spelling, such as colour, centre, cancelled and organize, in your messages,
+              commit messages and pull request text.
             - Send at most a short sentence when you start a major step.
             - End every turn with one or two sentences that say what you changed and whether tests passed.
         """.trimIndent()
