@@ -38,13 +38,17 @@ class TaskEngine(
     onMessage: (Task, TaskMessage) -> Unit = { _, _ -> },
     /** Called for each new progress note, so the app can read it aloud without posting a notification. */
     onProgress: (Task, String) -> Unit = { _, _ -> },
+    /** Called for things worth interrupting the driver for: failed checks, a question from Claude, a stuck task. */
+    private val onAlert: (Task, AlertKind, String) -> Unit = { _, _, _ -> },
     /** Waits between retries. Tests pass a no-op. */
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val dispatcher: CoroutineContext = Dispatchers.IO,
 ) {
     private val journal = TaskJournal(store, clock, onMessage, onProgress, config::quietMode)
     private val spending = SpendingLimit(store, config, journal)
-    private val pullRequests = PullRequests(store, config, journal, clock, githubFactory, ::autoFix)
+    private val pullRequests = PullRequests(store, config, journal, clock, githubFactory, ::autoFix, ::alert)
+    /** Tasks already reported as stuck in their current turn. */
+    private val stuckAlerted = ConcurrentHashMap.newKeySet<String>()
 
     private val running = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
@@ -179,6 +183,29 @@ class TaskEngine(
     private fun waitingToReconnect(task: Task, now: Long): Boolean =
         task.status == TaskStatus.Failed && task.interrupted && !isRunning(task.id) &&
             now - (task.interruptedSinceMillis ?: task.updatedMillis) < AUTO_RESUME_MILLIS
+
+    /**
+     * Alerts once per turn for each task that's been working for [STUCK_MILLIS] without a single update,
+     * so a hung session doesn't burn money unnoticed. Call it regularly.
+     */
+    fun checkStuck() {
+        val now = clock()
+        store.all()
+            .filter { it.status == TaskStatus.Working && isRunning(it.id) && now - it.updatedMillis >= STUCK_MILLIS && it.id !in stuckAlerted }
+            .forEach { task ->
+                stuckAlerted += task.id
+                val minutes = (now - task.updatedMillis) / 60_000
+                val text = "Claude hasn't sent an update on ${task.title} in $minutes minutes. Say stop to stop it, or status to check on it."
+                journal.status(task.id, text, notify = false)
+                alert(task.id, AlertKind.Stuck, text)
+            }
+    }
+
+    private fun alert(taskId: String, kind: AlertKind, text: String) {
+        val task = store.get(taskId) ?: return
+        // An alert that can't be shown must never stop the task.
+        runCatching { onAlert(task, kind, text) }
+    }
 
     /** Stops a task that's working: Claude is interrupted and the task waits for a new prompt. */
     fun stop(taskId: String) {
@@ -317,6 +344,7 @@ class TaskEngine(
 
     private fun launchTurn(taskId: String) {
         running.remove(taskId)?.cancel()
+        stuckAlerted -= taskId
         journal.update(taskId) { it.copy(status = TaskStatus.Working, interrupted = false) }
         val job = scope.launch(dispatcher, start = CoroutineStart.LAZY) {
             val key = config.anthropicKey()
@@ -468,8 +496,9 @@ class TaskEngine(
                 pullRequests.rewatch(taskId)
             }
         }
-        val asked = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.endsWith("?") == true
-        journal.update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done, interruptedSinceMillis = null) }
+        val question = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.takeIf { it.endsWith("?") }
+        journal.update(taskId) { it.copy(status = if (question != null) TaskStatus.NeedsInput else TaskStatus.Done, interruptedSinceMillis = null) }
+        if (question != null) alert(taskId, AlertKind.Question, question)
     }
 
     companion object {
@@ -481,6 +510,8 @@ class TaskEngine(
         private const val RESUME_INTERVAL_MILLIS = 30_000L
         /** How long to keep trying automatically before leaving it to the network callback or the Try again button. */
         private const val AUTO_RESUME_MILLIS = 2 * 60 * 60 * 1000L
+        /** How long a working task may go without any update before the driver is told it looks stuck. */
+        const val STUCK_MILLIS = 15 * 60 * 1000L
 
         /** Sent when the driver asks Claude to fix the checks that failed on its pull request. */
         fun fixChecksPrompt(task: Task): String {

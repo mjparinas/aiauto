@@ -30,7 +30,8 @@ class ReplyReceiver : BroadcastReceiver() {
             else g.notifier.clear(target)
             return
         }
-        val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.trim()
+        val text = if (intent.action == ACTION_QUICK) intent.getStringExtra(EXTRA_QUICK_TEXT)
+        else RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.trim()
         if (text.isNullOrEmpty()) return
         if (target == Notifier.CHAT_TARGET) {
             // Show the question right away so the car stops waiting, then answer when Claude replies.
@@ -65,6 +66,9 @@ class ReplyReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_REPLY = "dev.aiauto.REPLY"
         const val ACTION_READ = "dev.aiauto.READ"
+        /** A one-tap reply from an alert, such as "yes" to fix failed checks. */
+        const val ACTION_QUICK = "dev.aiauto.QUICK"
+        const val EXTRA_QUICK_TEXT = "quick_text"
         const val EXTRA_TARGET = "target"
         const val KEY_TEXT = "text"
     }

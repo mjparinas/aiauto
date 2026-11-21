@@ -106,6 +106,7 @@ class EngineControlsTest {
     private val claude = FakeClaude()
     private val github = FakeGitHub()
     private val said = mutableListOf<String>()
+    private val alerts = mutableListOf<AlertKind>()
     private var now = 1_000_000L
 
     private fun engine() = TaskEngine(
@@ -116,6 +117,7 @@ class EngineControlsTest {
         claudeFactory = { claude },
         githubFactory = { github },
         onMessage = { _, m -> said += m.text },
+        onAlert = { _, kind, text -> alerts += kind; said += text },
         sleep = {},
         dispatcher = Dispatchers.Unconfined,
     )
@@ -437,5 +439,28 @@ class EngineControlsTest {
             SpokenStatus.forRepo(status, now),
         )
         assertEquals("$1.30", SpokenStatus.money(1.3))
+    }
+
+    @Test fun alertsWhenChecksFailAndNobodyIsFixingThem() {
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("build"), total = 1)
+        engine.refreshPullRequest(task.id)
+        assertEquals(listOf(AlertKind.ChecksFailed), alerts)
+    }
+
+    @Test fun noAlertWhileClaudeFixesChecksItself() {
+        config.fixChecks = true
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("build"), total = 1)
+        engine.refreshPullRequest(task.id)
+        assertTrue(AlertKind.ChecksFailed !in alerts)
+    }
+
+    @Test fun alertsWhenClaudeAsksAQuestion() {
+        claude.turns += listOf(AgentUpdate.Said("Should I also update the docs?"), AgentUpdate.TurnDone)
+        engine().start(repo, "rename the setting")
+        assertEquals(listOf(AlertKind.Question), alerts)
     }
 }
