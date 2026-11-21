@@ -5,7 +5,8 @@ task, PRs opened automatically, updates read aloud). Ordered roughly by how much
 
 ## Close the loop by voice
 
-Built: merge by voice, CI results read aloud, and quick commands. See "Voice commands" in the README.
+Built: CI results read aloud, merging from the car, merge by voice with a yes or no confirmation, and quick
+commands. See "Voice commands" in the README.
 
 - **Merge by voice.** Reply "merge it" to a task whose PR is open. The app checks that CI is green and the PR is
   mergeable, reads back "Merging PR 12 into main, say yes to confirm", then calls the GitHub merge API. Needs

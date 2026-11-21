@@ -18,17 +18,52 @@ data class RepoRef(
         /** Accepts `owner/name` or a github.com URL. Returns null when the text isn't a repo. */
         fun parse(text: String): RepoRef? {
             val match = pattern.matchEntire(text.trim()) ?: return null
+            // "." and ".." would turn the API path into a different GitHub endpoint.
+            if (match.groupValues.drop(1).any { it.all { c -> c == '.' } }) return null
             return RepoRef(match.groupValues[1], match.groupValues[2])
+        }
+
+        /**
+         * Finds the repos in [candidates] that match a spoken name, ignoring case, spaces and punctuation,
+         * so "AI auto" matches aiauto and "my parinas slash ai auto" can match mjparinas/aiauto.
+         * Matches on the full name first, then on the name alone.
+         */
+        fun matchSpoken(spoken: String, candidates: List<RepoRef>): List<RepoRef> {
+            fun norm(s: String) = s.lowercase().replace(" slash ", "/").filter { it.isLetterOrDigit() }
+            val said = norm(spoken)
+            if (said.isEmpty()) return emptyList()
+            val byFull = candidates.filter { norm(it.fullName) == said }
+            if (byFull.isNotEmpty()) return byFull
+            val nameOnly = norm(spoken.substringAfterLast('/').substringAfterLast(" slash "))
+            return candidates.filter { norm(it.name) == nameOnly }
         }
     }
 }
 
 @Serializable
-enum class TaskStatus { Starting, Working, NeedsInput, Done, Failed }
+enum class TaskStatus { Starting, Working, NeedsInput, Done, Failed, Stopped }
 
-/** Something the app asked the driver to confirm with a yes or no. */
+/** Where a pull request stands on GitHub. */
 @Serializable
-enum class PendingAction { Merge, FixBuild }
+enum class PrState { Open, Merged, Closed }
+
+/**
+ * The combined result of a commit's checks (GitHub Actions and other status checks).
+ * [Unknown] means the token can't read them, which is never treated as passing.
+ */
+@Serializable
+enum class Checks { None, Pending, Passing, Failing, Unknown }
+
+@Serializable
+data class ChecksSummary(
+    val state: Checks,
+    val failing: List<String> = emptyList(),
+    val total: Int = 0,
+)
+
+/** Something the app asked the driver, waiting for a spoken yes or no. */
+@Serializable
+enum class PendingAction { Merge, FixChecks }
 
 @Serializable
 enum class Speaker { You, Claude, Status }
@@ -53,17 +88,46 @@ data class Task(
     val status: TaskStatus = TaskStatus.Starting,
     val prUrl: String? = null,
     val prNumber: Int? = null,
-    val pending: PendingAction? = null,
-    /** The last commit whose CI result was announced, so each push is reported once. */
-    val ciSha: String? = null,
-    /** What failed in CI on that commit, handed to Claude when the driver says "fix it". */
-    val ciFailure: String? = null,
     val messages: List<TaskMessage> = emptyList(),
     val createdMillis: Long,
     val updatedMillis: Long,
+    /** A prompt that hasn't reached Claude yet. It's sent again when the task resumes. */
+    val pendingPrompt: String? = null,
+    /** Stopped because the connection dropped, not because of Claude. Resumes when the network is back. */
+    val interrupted: Boolean = false,
+    /** When the connection first dropped in this run of trouble. Cleared once a turn finishes or the task stops for good. */
+    val interruptedSinceMillis: Long? = null,
+    /** Live pull request state, refreshed from GitHub. Null until a pull request exists. */
+    val prState: PrState? = null,
+    val checks: ChecksSummary? = null,
+    /** GitHub's own auto-merge is on for the pull request, so GitHub merges it once required checks pass. */
+    val githubAutoMerge: Boolean = false,
+    val prOpenedMillis: Long? = null,
+    /** What this task's Claude session has cost so far, in US dollars at list price. */
+    val costUsd: Double = 0.0,
+    /** Put away by the user: shown on the Archived tab instead of the main list. */
+    val archived: Boolean = false,
+    /** A yes-or-no question the app asked, answered by the next reply. */
+    val pending: PendingAction? = null,
 ) {
+    /** A pull request exists and hasn't been merged or closed yet. */
+    val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open
+
+    /** Mid-turn, or cut off by a lost connection and still resumable. */
+    val isActive: Boolean
+        get() = status == TaskStatus.Working || status == TaskStatus.Starting || interrupted
+
+    /** Nothing left to do or watch: safe to clear from the list. */
+    val isFinished: Boolean
+        get() = status == TaskStatus.Stopped ||
+            (status == TaskStatus.Failed && !interrupted) ||
+            (status == TaskStatus.Done && !hasOpenPr)
+
     val lastMessage: TaskMessage? get() = messages.lastOrNull()
 }
+
+/** Tasks waiting on the user's reply come first, so they're never pushed off a short list. Otherwise keeps the order. */
+fun List<Task>.needsYouFirst(): List<Task> = sortedBy { it.status != TaskStatus.NeedsInput }
 
 /** IDs of the agent and environment created once per API key. */
 @Serializable

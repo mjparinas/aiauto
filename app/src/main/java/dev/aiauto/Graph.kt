@@ -1,8 +1,17 @@
 package dev.aiauto
 
 import android.content.Context
+import androidx.car.app.connection.CarConnection
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import dev.aiauto.core.AgentSetup
+import dev.aiauto.core.Assistant
+import dev.aiauto.core.AssistantActions
 import dev.aiauto.core.EngineConfig
+import dev.aiauto.core.GitHub
+import dev.aiauto.core.RepoRef
+import dev.aiauto.core.Projects
 import dev.aiauto.core.TaskEngine
 import dev.aiauto.data.FileTaskStore
 import dev.aiauto.data.RepoStore
@@ -10,18 +19,22 @@ import dev.aiauto.data.Secrets
 import dev.aiauto.data.Settings
 import dev.aiauto.notify.Notifier
 import dev.aiauto.notify.Speaker
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
 /** App-wide objects. Created once in [AiAutoApp]. */
 class Graph(context: Context) {
+    private val appContext = context.applicationContext
     val secrets = Secrets(context)
     val settings = Settings(context)
     val tasks = FileTaskStore(context)
     val repos = RepoStore(context)
     val speaker = Speaker(context)
     val notifier = Notifier(context, settings, speaker)
-    val scope = CoroutineScope(SupervisorJob())
+    // Anything that slips past the engine's own error handling is logged instead of crashing the app.
+    val scope = CoroutineScope(SupervisorJob() + CoroutineExceptionHandler { _, e -> Log.e("AiAuto", "Background work failed", e) })
 
     val engine = TaskEngine(
         store = tasks,
@@ -30,13 +43,129 @@ class Graph(context: Context) {
             override fun githubToken() = secrets.githubToken
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
+            override fun quietMode() = settings.quietMode
+            override fun dailyLimitUsd() = settings.dailyLimitUsd
+            override fun spentTodayUsd() = settings.spentTodayUsd
+            override fun addSpend(usd: Double) = settings.addSpend(usd)
+            override fun autoMerge() = settings.autoMerge
         },
         scope = scope,
         onMessage = { task, message ->
             notifier.onMessage(task, message)
             TaskService.ensureRunning(context)
         },
+        onProgress = { _, text -> notifier.onProgress(text) },
     )
+
+    /** The spoken conversation behind the car's mic button. */
+    val assistant = Assistant(
+        apiKey = { secrets.anthropicKey },
+        actions = object : AssistantActions {
+            override fun context(): String {
+                val repoList = repos.repos.value.joinToString(", ") { it.fullName }.ifEmpty { "none" }
+                val recent = tasks.all().filter { !it.archived }.take(6).joinToString("\n") { t ->
+                    "- task ${t.id} in ${t.repo.fullName}: ${t.title} (${dev.aiauto.car.TasksScreen.statusLabel(t)})" +
+                        (t.lastMessage?.let { ". Last said: ${it.text.take(300)}" } ?: "")
+                }.ifEmpty { "none" }
+                return "Saved repos: $repoList\nRecent tasks:\n$recent"
+            }
+
+            override fun startTask(repo: String, request: String): String {
+                val all = repos.repos.value
+                val match = all.firstOrNull { it.fullName.equals(repo, ignoreCase = true) }
+                    ?: all.filter { it.name.equals(repo.substringAfter('/'), ignoreCase = true) }.singleOrNull()
+                    ?: throw IllegalArgumentException("No saved repo matches \"$repo\". Saved: ${all.joinToString { it.fullName }}")
+                require(request.isNotBlank()) { "The request is empty." }
+                val task = engine.start(match, request)
+                TaskService.ensureRunning(appContext)
+                return "Started task ${task.id} in ${match.fullName}."
+            }
+
+            override fun replyToTask(taskId: String, text: String): String {
+                val task = tasks.get(taskId) ?: throw IllegalArgumentException("No task with id $taskId.")
+                engine.prompt(task.id, text)
+                TaskService.ensureRunning(appContext)
+                return "Sent to task ${task.id}."
+            }
+
+            override fun addRepo(name: String): String {
+                val token = secrets.githubToken ?: throw IllegalStateException("Add a GitHub token in the app on your phone first.")
+                require(name.isNotBlank()) { "No repo name was given." }
+                val github = GitHub(token)
+                val exact = RepoRef.parse(name)
+                val repo = if (exact != null) {
+                    github.repo(exact.owner, exact.name)
+                } else {
+                    val mine = github.myRepos()
+                    val matches = RepoRef.matchSpoken(name, mine)
+                    when {
+                        matches.size == 1 -> matches.first()
+                        matches.isEmpty() -> throw IllegalArgumentException(
+                            "None of your GitHub repos is called \"$name\". Recent ones: ${mine.take(5).joinToString { it.name }}",
+                        )
+                        else -> throw IllegalArgumentException("More than one repo matches: ${matches.joinToString { it.fullName }}. Say the owner too.")
+                    }
+                }
+                if (repos.find(repo.fullName) != null) return "${repo.fullName} is already saved."
+                repos.add(repo)
+                return "Added ${repo.fullName}."
+            }
+        },
+        canSpend = { settings.dailyLimitUsd?.let { settings.spentTodayUsd < it } ?: true },
+        onSpend = { settings.addSpend(it) },
+    )
+
+    /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */
+    val projects = Projects(githubToken = { secrets.githubToken }, scope = scope)
+
+    /** Merges a pull request from the project view, then refreshes any task that owns it. Blocking. */
+    fun mergePull(repo: dev.aiauto.core.RepoRef, number: Int): String {
+        val task = tasks.all().firstOrNull { it.repo.fullName == repo.fullName && it.prNumber == number }
+        val message = if (task != null) engine.mergeNow(task.id) else projects.merge(repo, number)
+        projects.refresh(repo)
+        return message
+    }
+
+    /** Opens the "Talk to Claude" conversation each time the phone connects to the car, and removes it after. */
+    fun watchCar(context: Context) {
+        var connected = false
+        runCatching {
+            CarConnection(context.applicationContext).type.observeForever { type ->
+                val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
+                try {
+                    if (now && !connected && isConfigured) notifier.startChat()
+                    if (!now && connected) notifier.clearChat()
+                    // Make sure the foreground service holds running tasks before and after the car goes away,
+                    // so work started from the car keeps going on the phone until it's done.
+                    if (now != connected && hasActiveWork()) TaskService.ensureRunning(context)
+                } catch (e: Throwable) {
+                    Log.w("AiAuto", "Car connection change failed", e)
+                }
+                connected = now
+            }
+        }.onFailure { Log.w("AiAuto", "Couldn't watch the car connection", it) }
+    }
+
+    /** True while a task is running or waiting to reconnect, so the foreground service should be up. */
+    fun hasActiveWork(): Boolean = tasks.all().any { engine.isRunning(it.id) } || engine.isReconnecting()
+
+    /** Resumes tasks that stopped because the connection dropped, as soon as the phone is back online. */
+    fun watchNetwork(context: Context) {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching {
+            connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+                    try {
+                        engine.onNetworkAvailable()
+                        if (hasActiveWork()) TaskService.ensureRunning(context)
+                    } catch (e: Throwable) {
+                        Log.w("AiAuto", "Couldn't resume tasks after the network came back", e)
+                    }
+                }
+            })
+        }.onFailure { Log.w("AiAuto", "Couldn't watch the network", it) }
+    }
 
     val isConfigured: Boolean get() = secrets.anthropicKey != null && secrets.githubToken != null
 }

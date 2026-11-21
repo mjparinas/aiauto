@@ -1,54 +1,57 @@
 package dev.aiauto.core
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-
-/** Where tasks live. The Android app backs this with a file; tests use a map. */
-interface TaskStore {
-    fun get(id: String): Task?
-    fun all(): List<Task>
-    fun put(task: Task)
-}
-
-/** Credentials and one-time setup the engine needs. Returning null means "not configured yet". */
-interface EngineConfig {
-    fun anthropicKey(): String?
-    fun githubToken(): String?
-    fun agentSetup(): AgentSetup?
-    fun saveAgentSetup(setup: AgentSetup)
-}
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Runs tasks: creates a session per task, sends prompts, follows the event stream,
  * and opens a pull request when Claude pushes its branch.
+ *
+ * Every step can be repeated safely, so a task that was cut off (lost signal, app killed, Claude busy)
+ * picks up where it left off: a session is created only once, a prompt is sent only until it is
+ * accepted, and the stream is followed again from the session's history.
+ *
+ * The engine owns the task lifecycle and the Claude session. It hands the rest to focused helpers:
+ * [TaskJournal] records state and conversation lines, [SpendingLimit] keeps the daily budget, and
+ * [PullRequests] opens, watches and merges pull requests.
  */
 class TaskEngine(
     private val store: TaskStore,
     private val config: EngineConfig,
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val claudeFactory: (String) -> ClaudeAgents = ::ClaudeAgents,
-    private val githubFactory: (String) -> GitHub = { GitHub(it) },
+    private val claudeFactory: (String) -> AgentClient = ::ClaudeAgents,
+    githubFactory: (String) -> GitHub = { GitHub(it) },
     /** Called for each new line, so the app can notify and read it aloud. */
-    private val onMessage: (Task, TaskMessage) -> Unit = { _, _ -> },
-    private val ciPollMillis: Long = 30_000,
-    private val ciTimeoutMillis: Long = 45 * 60_000,
+    onMessage: (Task, TaskMessage) -> Unit = { _, _ -> },
+    /** Called for each new progress note, so the app can read it aloud without posting a notification. */
+    onProgress: (Task, String) -> Unit = { _, _ -> },
+    /** Waits between retries. Tests pass a no-op. */
+    private val sleep: suspend (Long) -> Unit = { delay(it) },
+    private val dispatcher: CoroutineContext = Dispatchers.IO,
 ) {
+    private val journal = TaskJournal(store, clock, onMessage, onProgress, config::quietMode)
+    private val spending = SpendingLimit(store, config, journal)
+    private val pullRequests = PullRequests(store, config, journal, clock, githubFactory)
+
     private val running = ConcurrentHashMap<String, Job>()
-    private val ciWatchers = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
 
     fun isRunning(taskId: String) = running[taskId]?.isActive == true
 
-    /** True while Claude is working or the app is waiting on CI for this task. */
-    fun isBusy(taskId: String) = isRunning(taskId) || ciWatchers[taskId]?.isActive == true
+    // ---- Task lifecycle ------------------------------------------------------------------------
 
     /** Starts a new task on [repo] from a spoken or typed [request]. Returns the new task. */
     fun start(repo: RepoRef, request: String): Task {
@@ -63,294 +66,401 @@ class TaskEngine(
             updatedMillis = now,
         )
         store.put(task)
-        append(id, Speaker.You, request)
-        launchTurn(id) { claude, current ->
-            val setup = config.agentSetup() ?: claude.createSetup().also(config::saveAgentSetup)
-            val sessionId = claude.createSession(setup, current, requireNotNull(config.githubToken()) { "Add a GitHub token in Settings." })
-            update(id) { it.copy(sessionId = sessionId) }
-            append(id, Speaker.Status, "Claude is starting on ${repo.name}")
-            claude.sendPrompt(sessionId, ClaudeAgents.firstPrompt(current, request))
-        }
-        return store.get(id)!!
+        journal.append(id, Speaker.You, request)
+        launchTurn(id)
+        return store.get(id) ?: task
     }
 
     /**
-     * Adds a follow-up prompt to an existing task. Short commands like "status", "stop", "merge it"
-     * and yes or no answers to the app's own questions are handled here without a Claude turn.
+     * Adds a follow-up prompt to an existing task. Short spoken commands ("status", "stop", "merge it",
+     * "fix it") and yes or no answers to the app's own questions are handled here; the rest goes to Claude.
      */
     fun prompt(taskId: String, text: String) {
         val task = store.get(taskId) ?: return
-        append(taskId, Speaker.You, text)
         val command = VoiceCommand.parse(text)
         val pending = task.pending
-        if (pending != null) update(taskId) { it.copy(pending = null) }
+        if (pending != null) journal.update(taskId) { it.copy(pending = null) }
+        val checksFailing = task.hasOpenPr && task.checks?.state == Checks.Failing
         when {
-            command == VoiceCommand.Yes && pending == PendingAction.Merge -> return background(taskId, "merge") { merge(taskId) }
-            command == VoiceCommand.Yes && pending == PendingAction.FixBuild -> return fixBuild(taskId)
-            command == VoiceCommand.FixBuild && task.ciFailure != null -> return fixBuild(taskId)
-            command == VoiceCommand.No && pending != null -> return say(taskId, "Okay, leaving it as is")
-            command == VoiceCommand.Stop -> return stopTurn(taskId)
-            command == VoiceCommand.Status -> return say(taskId, statusLine(task))
-            command == VoiceCommand.Merge -> return background(taskId, "check the pull request") { askToMerge(taskId) }
+            command == VoiceCommand.Yes && pending == PendingAction.FixChecks ||
+                command == VoiceCommand.FixBuild && checksFailing -> send(taskId, text, fixChecksPrompt(task))
+            command == VoiceCommand.Yes && pending == PendingAction.Merge -> {
+                journal.append(taskId, Speaker.You, text)
+                scope.launch(dispatcher) { runCatching { mergeNow(taskId) } }
+            }
+            command == VoiceCommand.No && pending != null -> {
+                journal.append(taskId, Speaker.You, text)
+                journal.status(taskId, "Okay, leaving it as is.")
+            }
+            command == VoiceCommand.Stop -> {
+                journal.append(taskId, Speaker.You, text)
+                if (isRunning(taskId) || task.isActive) stop(taskId) else journal.status(taskId, "Claude isn't working on this right now.")
+            }
+            command == VoiceCommand.Status -> {
+                journal.append(taskId, Speaker.You, text)
+                journal.status(taskId, statusLine(task))
+            }
+            command == VoiceCommand.Merge -> {
+                journal.append(taskId, Speaker.You, text)
+                scope.launch(dispatcher) {
+                    runCatching { askToMerge(taskId) }.onFailure { journal.status(taskId, "Couldn't check the pull request. ${Failures.describe(it)}") }
+                }
+            }
+            else -> send(taskId, text, text)
         }
-        sendToClaude(taskId, text)
     }
 
-    private fun sendToClaude(taskId: String, text: String) {
+    /** Shows [shown] as the driver's line and sends [text] to Claude. */
+    private fun send(taskId: String, shown: String, text: String) {
         val task = store.get(taskId) ?: return
-        val sessionId = task.sessionId
-        if (sessionId == null) {
-            fail(taskId, "This task never got a session. Start a new task.")
-            return
+        journal.append(taskId, Speaker.You, shown)
+        if (task.archived) journal.update(taskId) { it.copy(archived = false) }
+        // Without a session the prompt joins the first message; otherwise it queues behind any unsent one.
+        if (task.sessionId != null) {
+            journal.update(taskId) { it.copy(pendingPrompt = listOfNotNull(it.pendingPrompt, text).joinToString("\n\n")) }
         }
-        launchTurn(taskId) { claude, _ -> claude.sendPrompt(sessionId, text) }
+        launchTurn(taskId)
     }
 
-    /** Re-attaches to tasks that were mid-turn when the app was closed. */
+    /** Picks a stopped task back up: creates its session if it never got one, resends unsent prompts, and reattaches. */
+    fun retry(taskId: String) {
+        if (isRunning(taskId) || store.get(taskId) == null) return
+        journal.progress(taskId, "Trying again")
+        launchTurn(taskId)
+    }
+
+    /** Re-attaches to tasks that were mid-turn when the app was closed, and to tasks cut off by a lost connection. */
     fun resumeAll() {
+        store.all().filter { it.isActive }.forEach { retry(it.id) }
+    }
+
+    /** Call when the phone gets a working network again. Resumes tasks that stopped because it was lost. */
+    fun onNetworkAvailable() {
+        store.all().filter { it.status == TaskStatus.Failed && it.interrupted }.forEach { retry(it.id) }
+    }
+
+    /**
+     * Retries tasks cut off by a lost connection, without waiting for the network callback, which doesn't fire
+     * when the phone stayed online but the connection was flaky or a server was down. Call it regularly.
+     * Each task waits [RESUME_INTERVAL_MILLIS] between tries, and gives up after [AUTO_RESUME_MILLIS].
+     */
+    fun resumeInterrupted() {
+        val now = clock()
         store.all()
-            .filter { it.sessionId != null && (it.status == TaskStatus.Working || it.status == TaskStatus.Starting) }
-            .forEach { task -> launchTurn(task.id) { _, _ -> } }
+            .filter { waitingToReconnect(it, now) && now - it.updatedMillis >= RESUME_INTERVAL_MILLIS }
+            .forEach { launchTurn(it.id) }
     }
 
+    /** True while some task is cut off and still being retried, so the app should stay awake. */
+    fun isReconnecting(): Boolean {
+        val now = clock()
+        return store.all().any { waitingToReconnect(it, now) }
+    }
+
+    private fun waitingToReconnect(task: Task, now: Long): Boolean =
+        task.status == TaskStatus.Failed && task.interrupted && !isRunning(task.id) &&
+            now - (task.interruptedSinceMillis ?: task.updatedMillis) < AUTO_RESUME_MILLIS
+
+    /** Stops a task that's working: Claude is interrupted and the task waits for a new prompt. */
     fun stop(taskId: String) {
-        running.remove(taskId)?.cancel()
-    }
-
-    private fun stopTurn(taskId: String) {
+        val wasRunning = running.remove(taskId)?.also { it.cancel() } != null
         val task = store.get(taskId) ?: return
-        if (!isRunning(taskId)) return say(taskId, "Claude isn't working on this right now")
-        stop(taskId)
-        update(taskId) { it.copy(status = TaskStatus.NeedsInput) }
-        say(taskId, "Stopped Claude. Reply to give it new directions")
+        if (!wasRunning && !task.isActive) return
+        journal.update(taskId) { it.copy(status = TaskStatus.Stopped, interrupted = false, interruptedSinceMillis = null, pendingPrompt = null) }
+        journal.status(taskId, "Stopped. Reply to give Claude a new direction.", notify = false)
         val sessionId = task.sessionId ?: return
-        val key = config.anthropicKey() ?: return
-        scope.launch(Dispatchers.IO) {
-            runCatching { claudeFactory(key).use { it.interrupt(sessionId) } }
+        scope.launch(dispatcher) {
+            withClaude { claude ->
+                runCatching { claude.interrupt(sessionId) }
+                spending.recordSessionCost(claude, taskId, sessionId)
+            }
         }
     }
 
+    /** Removes a task from the list. A running one is stopped first, and its Claude session is archived. */
+    fun clear(taskId: String) {
+        running.remove(taskId)?.cancel()
+        val task = store.get(taskId) ?: return
+        store.remove(taskId)
+        seenEvents.remove(taskId)
+        val sessionId = task.sessionId ?: return
+        scope.launch(dispatcher) {
+            withClaude { claude ->
+                if (task.isActive) runCatching { claude.interrupt(sessionId) }
+                runCatching { claude.archive(sessionId) }
+            }
+        }
+    }
+
+    /** Moves a task to the archive, keeping its chat. A task that's working is stopped first. */
+    fun archive(taskId: String) {
+        stop(taskId)
+        journal.update(taskId) { it.copy(archived = true) }
+    }
+
+    /** Brings an archived task back to the main list. */
+    fun unarchive(taskId: String) {
+        journal.update(taskId) { it.copy(archived = false) }
+    }
+
+    /** Clears every finished task (stopped, failed, or done with no open pull request) that isn't archived. Returns how many. */
+    fun clearFinished(): Int {
+        val finished = store.all().filter { it.isFinished && !it.archived && !isRunning(it.id) }
+        finished.forEach { clear(it.id) }
+        return finished.size
+    }
+
+    /** One spoken sentence on where the task stands. */
     private fun statusLine(task: Task): String {
-        val pr = task.prNumber?.let { "PR $it" }
+        val number = task.prNumber
         return when {
             isRunning(task.id) -> {
                 val last = task.messages.lastOrNull { it.speaker != Speaker.You }?.text?.trimEnd('.')
-                "Claude is working on it" + (last?.let { ". Latest: $it" } ?: "")
+                "Claude is working on it" + (last?.let { ". Latest: $it." } ?: ".")
             }
-            ciWatchers[task.id]?.isActive == true -> "Waiting for checks to finish on $pr"
-            task.status == TaskStatus.Failed -> "This task failed: " + (task.messages.lastOrNull { it.speaker == Speaker.Status }?.text ?: "no details")
-            task.ciFailure != null -> "Checks failed on $pr. Say fix it to have Claude look into it"
-            pr != null -> "$pr is open for review"
-            task.status == TaskStatus.NeedsInput -> "Claude is waiting for your answer"
-            else -> "Claude finished, and there's no pull request"
+            task.interrupted -> "The connection dropped. I'm still trying to reconnect."
+            task.status == TaskStatus.Failed -> "This task failed. " + (task.messages.lastOrNull { it.speaker == Speaker.Status }?.text ?: "")
+            task.status == TaskStatus.Stopped -> "This task is stopped. Reply to give Claude a new direction."
+            number == null -> if (task.status == TaskStatus.NeedsInput) "Claude is waiting for your answer." else "Claude finished, and there's no pull request."
+            task.prState == PrState.Merged -> "Pull request $number is merged."
+            task.prState == PrState.Closed -> "Pull request $number was closed without merging."
+            else -> when (task.checks?.state) {
+                Checks.Failing -> "Checks failed on pull request $number. Say fix it to have Claude fix them."
+                Checks.Pending -> "Checks are still running on pull request $number."
+                Checks.Passing -> "Checks passed on pull request $number. Say merge it to merge."
+                else -> "Pull request $number is open for review."
+            }
         }
     }
 
-    /** Checks the pull request and CI, then asks the driver to confirm the merge. */
+    /** Refreshes the pull request and its checks, then asks the driver to confirm the merge. */
     private fun askToMerge(taskId: String) {
+        if (store.get(taskId)?.prNumber == null) return journal.status(taskId, "There's no pull request to merge yet.")
+        if (isRunning(taskId)) return journal.status(taskId, "Claude is still working. Say merge it once it's done.")
+        pullRequests.refresh(taskId)
         val task = store.get(taskId) ?: return
-        val number = task.prNumber ?: return say(taskId, "There's no pull request to merge yet")
-        if (isRunning(taskId)) return say(taskId, "Claude is still working. Say merge once it's done")
-        val github = githubFactory(requireNotNull(config.githubToken()) { "Add a GitHub token in Settings." })
-        val pr = github.pull(task.repo, number)
+        val number = task.prNumber
+        val base = task.repo.defaultBranch
         when {
-            pr.merged -> return say(taskId, "PR $number is already merged")
-            pr.state != "open" -> return say(taskId, "PR $number is closed")
-            pr.mergeable == false -> return say(taskId, "PR $number has conflicts with ${task.repo.defaultBranch}, so it can't be merged as is")
-        }
-        val ci = pr.head?.sha?.let { github.ci(task.repo, it) } ?: CiResult(CiState.None)
-        when (ci.state) {
-            CiState.Pending -> say(taskId, "Checks are still running on PR $number. Ask again when they're done")
-            CiState.Failed -> {
-                update(taskId) { it.copy(pending = PendingAction.FixBuild, ciFailure = ci.details, status = TaskStatus.NeedsInput) }
-                say(taskId, "${ci.summary}, so I won't merge PR $number. Say yes to have Claude fix it")
-            }
-            CiState.Passed, CiState.None -> {
-                update(taskId) { it.copy(pending = PendingAction.Merge, status = TaskStatus.NeedsInput) }
-                val checks = if (ci.state == CiState.Passed) "${ci.summary}. " else "No checks ran. "
-                say(taskId, checks + "Say yes to merge PR $number into ${task.repo.defaultBranch}")
+            task.prState == PrState.Merged -> journal.status(taskId, "Pull request $number is already merged.")
+            task.prState == PrState.Closed -> journal.status(taskId, "Pull request $number is closed.")
+            else -> when (task.checks?.state) {
+                Checks.Failing -> ask(taskId, PendingAction.FixChecks, "Checks failed on pull request $number, so I won't merge it. Say yes to have Claude fix them.")
+                Checks.Pending -> journal.status(taskId, "Checks are still running on pull request $number. Ask again when they finish.")
+                Checks.Passing -> ask(taskId, PendingAction.Merge, "Checks passed. Say yes to merge pull request $number into $base.")
+                Checks.Unknown -> ask(taskId, PendingAction.Merge, "I can't read the checks on pull request $number. Say yes to merge it into $base anyway.")
+                Checks.None, null -> ask(taskId, PendingAction.Merge, "No checks ran. Say yes to merge pull request $number into $base.")
             }
         }
     }
 
-    private fun merge(taskId: String) {
-        val task = store.get(taskId) ?: return
-        val number = task.prNumber ?: return
-        githubFactory(requireNotNull(config.githubToken()) { "Add a GitHub token in Settings." }).merge(task.repo, number)
-        update(taskId) { it.copy(status = TaskStatus.Done) }
-        say(taskId, "Merged PR $number into ${task.repo.defaultBranch}")
+    private fun ask(taskId: String, action: PendingAction, question: String) {
+        journal.update(taskId) { it.copy(pending = action) }
+        journal.status(taskId, question)
     }
 
-    private fun fixBuild(taskId: String) {
-        val failure = store.get(taskId)?.ciFailure ?: return
-        update(taskId) { it.copy(ciFailure = null) }
-        sendToClaude(taskId, ClaudeAgents.fixBuildPrompt(failure))
+    /** Today's spend against the daily limit, for display. */
+    fun spentTodayUsd(): Double = spending.spentTodayUsd()
+
+    // ---- Pull requests -------------------------------------------------------------------------
+
+    /** True while some pull request's checks or merge are worth watching, so the app should stay awake. */
+    fun isWatchingPullRequests(): Boolean {
+        val now = clock()
+        return store.all().any { !isRunning(it.id) && pullRequests.needsWatching(it, now) }
     }
 
-    /** Runs a GitHub call off the caller's thread and reports a failure as a spoken line. */
-    private fun background(taskId: String, what: String, block: () -> Unit) {
-        scope.launch(Dispatchers.IO) {
-            runCatching(block).onFailure { say(taskId, "Couldn't $what: ${it.message}") }
+    /** Refreshes state and checks for every task with an open pull request, and merges green ones when auto-merge is on. */
+    fun refreshPullRequests(): Job = scope.launch(dispatcher) {
+        store.all().filter { it.hasOpenPr && !isRunning(it.id) }.forEach { task ->
+            currentCoroutineContext().ensureActive()
+            runCatching { pullRequests.refresh(task.id) }
         }
     }
 
-    private fun say(taskId: String, text: String) = append(taskId, Speaker.Status, text)
+    /** Fetches one task's pull request and checks, says what changed, and merges it if it's ready. */
+    fun refreshPullRequest(taskId: String) = pullRequests.refresh(taskId)
 
-    /**
-     * Polls GitHub Actions for the pull request's latest commit and announces the result once.
-     * Gives up quietly when the repo has no workflows.
-     */
-    internal fun watchCi(taskId: String) {
-        ciWatchers.remove(taskId)?.cancel()
-        val job = scope.launch(Dispatchers.IO) {
-            val deadline = clock() + ciTimeoutMillis
-            var emptyPolls = 0
-            while (isActive && clock() < deadline) {
-                delay(ciPollMillis)
-                val task = store.get(taskId) ?: return@launch
-                val number = task.prNumber ?: return@launch
-                val github = githubFactory(config.githubToken() ?: return@launch)
-                val (sha, ci) = runCatching {
-                    val sha = github.pull(task.repo, number).head?.sha
-                    sha?.let { it to github.ci(task.repo, it) }
-                }.getOrNull() ?: continue
-                if (sha == task.ciSha) return@launch
-                when (ci.state) {
-                    CiState.None -> if (++emptyPolls >= 4) return@launch
-                    CiState.Pending -> emptyPolls = 0
-                    CiState.Passed -> {
-                        update(taskId) { it.copy(ciSha = sha, ciFailure = null) }
-                        say(taskId, "${ci.summary} on PR $number. Say merge to merge it")
-                        return@launch
-                    }
-                    CiState.Failed -> {
-                        update(taskId) { it.copy(ciSha = sha, ciFailure = ci.details, pending = PendingAction.FixBuild, status = TaskStatus.NeedsInput) }
-                        say(taskId, "${ci.summary} on PR $number. Say yes to have Claude fix it")
-                        return@launch
-                    }
-                }
-            }
-        }
-        ciWatchers[taskId] = job
-        job.invokeOnCompletion { ciWatchers.remove(taskId, job) }
+    /** Merges a task's pull request now, at the user's request. Returns a sentence saying what happened. */
+    fun mergeNow(taskId: String): String = pullRequests.mergeNow(taskId)
+
+    // ---- Running a turn ------------------------------------------------------------------------
+
+    private inline fun withClaude(block: (AgentClient) -> Unit) {
+        val key = config.anthropicKey() ?: return
+        runCatching { claudeFactory(key) }.getOrNull()?.use(block)
     }
 
-    private fun launchTurn(taskId: String, begin: (ClaudeAgents, Task) -> Unit) {
+    private fun launchTurn(taskId: String) {
         running.remove(taskId)?.cancel()
-        update(taskId) { it.copy(status = TaskStatus.Working) }
-        running[taskId] = scope.launch(Dispatchers.IO) {
+        journal.update(taskId) { it.copy(status = TaskStatus.Working, interrupted = false) }
+        val job = scope.launch(dispatcher, start = CoroutineStart.LAZY) {
             val key = config.anthropicKey()
             if (key == null) {
-                fail(taskId, "Add your Claude API key in Settings.")
+                journal.fail(taskId, "Add your Claude API key in Settings.")
                 return@launch
             }
-            val claude = claudeFactory(key)
+            var claude: AgentClient? = null
             try {
-                begin(claude, store.get(taskId)!!)
-                followUntilDone(claude, taskId)
-            } catch (e: kotlinx.coroutines.CancellationException) {
+                val client = claudeFactory(key).also { claude = it }
+                withRetries { prepare(client, taskId) }
+                followUntilDone(client, taskId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Catch everything, not just exceptions, so a task never stays stuck on "Working" with nothing running.
+                // Stopped or cleared by the user while a call was in flight: don't overwrite that with an error.
+                if (currentCoroutineContext().isActive) {
+                    runCatching { if (Failures.isTransient(e)) journal.interrupt(taskId, e) else journal.fail(taskId, Failures.describe(e)) }
+                }
+            } finally {
+                runCatching { claude?.close() }
+                running.remove(taskId, currentCoroutineContext()[Job])
+            }
+        }
+        running[taskId] = job
+        job.start()
+    }
+
+    /** Makes sure the task has a session and that Claude has every prompt. Safe to repeat. */
+    private fun prepare(claude: AgentClient, taskId: String) {
+        val task = store.get(taskId) ?: return
+        if (task.sessionId == null || task.pendingPrompt != null) spending.checkBeforeSending()
+        if (task.sessionId == null) {
+            val token = config.githubToken() ?: throw IllegalStateException("Add a GitHub token in Settings.")
+            val sessionId = try {
+                claude.createSession(agentSetup(claude), task, token)
+            } catch (e: Exception) {
+                // The saved agent or environment is gone (deleted, or the key now points at another workspace).
+                if (!Failures.isMissing(e)) throw e
+                claude.createSession(claude.createSetup().also(config::saveAgentSetup), task, token)
+            }
+            val request = task.messages.filter { it.speaker == Speaker.You }.joinToString("\n") { it.text }
+            journal.update(taskId) { it.copy(sessionId = sessionId, pendingPrompt = ClaudeAgents.firstPrompt(it, request)) }
+            journal.step(taskId, Speaker.Status, "Claude is starting on ${task.repo.name}")
+        }
+        val current = store.get(taskId) ?: return
+        val prompt = current.pendingPrompt ?: return
+        spending.capSession(claude, current)
+        claude.sendPrompt(current.sessionId!!, prompt)
+        journal.update(taskId) { if (it.pendingPrompt == prompt) it.copy(pendingPrompt = null) else it }
+    }
+
+    private fun agentSetup(claude: AgentClient): AgentSetup =
+        config.agentSetup() ?: claude.createSetup().also(config::saveAgentSetup)
+
+    /** Runs [block], retrying short outages with backoff before giving up. */
+    private suspend fun withRetries(block: () -> Unit) {
+        var attempt = 0
+        while (true) {
+            try {
+                return runInterruptible { block() }
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail(taskId, e.message ?: e.javaClass.simpleName)
-            } finally {
-                claude.close()
-                running.remove(taskId)
+                if (!Failures.isTransient(e) || ++attempt >= SEND_ATTEMPTS) throw e
+                sleep(Failures.backoffMillis(attempt))
             }
         }
     }
 
-    private suspend fun followUntilDone(claude: ClaudeAgents, taskId: String) {
+    private suspend fun followUntilDone(claude: AgentClient, taskId: String) {
         val sessionId = store.get(taskId)?.sessionId ?: return
         val seen = seenEvents.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }
-        var attempts = 0
-        var finished = false
-        while (!finished && scope.isActive) {
-            try {
+        var failures = 0
+        var quiet = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            var heard = false
+            val over = try {
                 runInterruptible {
-                    claude.follow(sessionId, seen) { update ->
-                        if (handle(taskId, update)) finished = true
+                    var halted = false
+                    claude.follow(sessionId, seen, onConnected = { failures = 0 }, shouldStop = { halted }) { update ->
+                        heard = true
+                        // Once the turn is over for the app (a failure, or the spending limit), ignore the rest.
+                        if (!halted && handle(claude, taskId, update)) halted = true
                     }
                 }
-                finished = true
-            } catch (e: java.io.IOException) {
-                // Phones drop connections in tunnels and parking garages. Reconnect with backoff.
-                if (++attempts > 6) throw e
-                delay(2_000L * attempts)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Phones drop connections in tunnels and parking garages. Reconnect with backoff;
+                // the session keeps running on Claude's side and its history fills the gap.
+                if (!Failures.isTransient(e) || ++failures > MAX_RECONNECTS) throw e
+                if (failures == 2) journal.progress(taskId, "Connection dropped. Reconnecting")
+                sleep(Failures.backoffMillis(failures))
+                continue
             }
+            if (over) break
+            // The server closed the stream mid-turn. Reconnect, but don't spin forever on a silent session.
+            quiet = if (heard) 0 else quiet + 1
+            if (quiet > MAX_QUIET_RECONNECTS) throw IllegalStateException("Claude stopped sending updates. Tap Try again to check on it.")
+            sleep(QUIET_RECONNECT_MILLIS)
         }
+        spending.recordSessionCost(claude, taskId, sessionId)
         if (store.get(taskId)?.status == TaskStatus.Working) afterTurn(taskId)
     }
 
-    /** Returns true when the turn is over. */
-    private fun handle(taskId: String, update: AgentUpdate): Boolean = when (update) {
-        is AgentUpdate.Progress -> { progress(taskId, update.text); false }
-        is AgentUpdate.Said -> { append(taskId, Speaker.Claude, update.text); false }
-        is AgentUpdate.Declined -> { append(taskId, Speaker.Status, "Skipped a risky ${update.toolName} step that needs review"); false }
+    /** Applies one update from Claude's event stream. Returns true when the turn is over. */
+    private fun handle(claude: AgentClient, taskId: String, update: AgentUpdate): Boolean = when (update) {
+        is AgentUpdate.Progress -> { journal.progress(taskId, update.text); false }
+        is AgentUpdate.Said -> { journal.step(taskId, Speaker.Claude, update.text); false }
+        is AgentUpdate.Declined -> { journal.step(taskId, Speaker.Status, "Skipped a risky ${update.toolName} step that needs review"); false }
         is AgentUpdate.TurnDone -> true
-        is AgentUpdate.Failed -> { fail(taskId, update.reason); true }
+        is AgentUpdate.Failed -> { journal.fail(taskId, update.reason); true }
+        is AgentUpdate.BudgetReached -> { journal.fail(taskId, spending.limitMessage()); true }
+        is AgentUpdate.Cost -> {
+            spending.recordCost(taskId, update.totalUsd)
+            if (spending.overLimit()) {
+                // A backstop for the session's own budget: stop as soon as the day's limit is reached.
+                store.get(taskId)?.sessionId?.let { id -> runCatching { claude.interrupt(id) } }
+                journal.fail(taskId, spending.limitMessage())
+                true
+            } else {
+                false
+            }
+        }
     }
 
     /** After a turn: open or refresh the pull request, then mark the task done or waiting. */
-    private fun afterTurn(taskId: String) {
+    private suspend fun afterTurn(taskId: String) {
         val task = store.get(taskId) ?: return
-        val token = config.githubToken()
-        if (token != null) {
-            runCatching {
-                val github = githubFactory(token)
-                if (task.prNumber == null && github.branchExists(task.repo, task.branch)) {
-                    val pr = github.findPull(task.repo, task.branch) ?: github.openPull(
-                        task.repo, task.branch, task.title, prBody(task),
-                    )
-                    update(taskId) { it.copy(prUrl = pr.htmlUrl, prNumber = pr.number) }
-                    append(taskId, Speaker.Status, "Pull request ${pr.number} is open for review")
+        journal.announceTurnResult(taskId)
+        if (config.githubToken() != null) {
+            if (task.prNumber == null) {
+                try {
+                    withRetries { pullRequests.open(taskId) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    journal.status(taskId, "Couldn't open the pull request. ${Failures.describe(e)}")
                 }
-            }.onFailure { append(taskId, Speaker.Status, "Couldn't open the pull request: ${it.message}") }
+            } else if (task.hasOpenPr) {
+                pullRequests.rewatch(taskId)
+            }
         }
         val asked = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.endsWith("?") == true
-        update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done) }
-        if (store.get(taskId)?.prNumber != null) watchCi(taskId)
-    }
-
-    private fun prBody(task: Task): String = buildString {
-        appendLine("Requested by voice from AIAuto.")
-        appendLine()
-        task.messages.filter { it.speaker == Speaker.You }.forEach { appendLine("> ${it.text}") }
-        task.messages.lastOrNull { it.speaker == Speaker.Claude }?.let {
-            appendLine()
-            appendLine(it.text)
-        }
-    }
-
-    private fun fail(taskId: String, reason: String) {
-        append(taskId, Speaker.Status, reason)
-        update(taskId) { it.copy(status = TaskStatus.Failed) }
-    }
-
-    /** Progress notes replace the previous one so the conversation doesn't fill with "Editing files". */
-    private fun progress(taskId: String, text: String) {
-        val task = store.get(taskId) ?: return
-        val last = task.messages.lastOrNull()
-        if (last?.speaker == Speaker.Status && last.text == text) return
-        if (last?.speaker == Speaker.Status && last.id.startsWith(PROGRESS)) {
-            update(taskId) { it.copy(messages = it.messages.dropLast(1)) }
-        }
-        append(taskId, Speaker.Status, text, notify = false, idPrefix = PROGRESS)
-    }
-
-    private fun append(taskId: String, speaker: Speaker, text: String, notify: Boolean = true, idPrefix: String = "m-") {
-        val message = TaskMessage(idPrefix + UUID.randomUUID().toString().take(8), speaker, text, clock())
-        update(taskId) { it.copy(messages = it.messages + message) }
-        if (notify && speaker != Speaker.You) store.get(taskId)?.let { onMessage(it, message) }
-    }
-
-    @Synchronized
-    private fun update(taskId: String, transform: (Task) -> Task) {
-        val task = store.get(taskId) ?: return
-        store.put(transform(task).copy(updatedMillis = clock()))
+        journal.update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done, interruptedSinceMillis = null) }
     }
 
     companion object {
-        private const val PROGRESS = "p-"
+        private const val SEND_ATTEMPTS = 3
+        private const val MAX_RECONNECTS = 8
+        private const val MAX_QUIET_RECONNECTS = 30
+        private const val QUIET_RECONNECT_MILLIS = 1_000L
+        /** How long to wait between automatic tries for a task cut off by a lost connection. */
+        private const val RESUME_INTERVAL_MILLIS = 30_000L
+        /** How long to keep trying automatically before leaving it to the network callback or the Try again button. */
+        private const val AUTO_RESUME_MILLIS = 2 * 60 * 60 * 1000L
+
+        /** Sent when the driver asks Claude to fix the checks that failed on its pull request. */
+        fun fixChecksPrompt(task: Task): String {
+            val failing = task.checks?.failing.orEmpty()
+            return "The checks failed on pull request ${task.prNumber} after your last push" +
+                (if (failing.isEmpty()) "." else ": ${failing.joinToString(", ")}.") +
+                " You can't see their logs. Reproduce the failure by running the same build or tests here, fix it," +
+                " commit, and push to the same branch."
+        }
 
         fun titleFrom(request: String): String {
             val words = request.trim().split(Regex("\\s+"))
