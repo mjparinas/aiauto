@@ -123,7 +123,7 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
 
     /** Repos the token can push to, most recently pushed first. */
     fun myRepos(): List<RepoRef> =
-        json.decodeFromString<List<RepoJson>>(get("/user/repos?sort=pushed&per_page=50"))
+        json.decodeFromString<List<RepoJson>>(get("/user/repos?sort=pushed&per_page=100"))
             .filter { it.permissions?.push != false }
             .map { it.toRef() }
 
