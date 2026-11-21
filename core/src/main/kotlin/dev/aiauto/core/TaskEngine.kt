@@ -71,10 +71,49 @@ class TaskEngine(
         return store.get(id) ?: task
     }
 
-    /** Adds a follow-up prompt to an existing task. */
+    /**
+     * Adds a follow-up prompt to an existing task. Short spoken commands ("status", "stop", "merge it",
+     * "fix it") and yes or no answers to the app's own questions are handled here; the rest goes to Claude.
+     */
     fun prompt(taskId: String, text: String) {
         val task = store.get(taskId) ?: return
-        journal.append(taskId, Speaker.You, text)
+        val command = VoiceCommand.parse(text)
+        val pending = task.pending
+        if (pending != null) journal.update(taskId) { it.copy(pending = null) }
+        val checksFailing = task.hasOpenPr && task.checks?.state == Checks.Failing
+        when {
+            command == VoiceCommand.Yes && pending == PendingAction.FixChecks ||
+                command == VoiceCommand.FixBuild && checksFailing -> send(taskId, text, fixChecksPrompt(task))
+            command == VoiceCommand.Yes && pending == PendingAction.Merge -> {
+                journal.append(taskId, Speaker.You, text)
+                scope.launch(dispatcher) { runCatching { mergeNow(taskId) } }
+            }
+            command == VoiceCommand.No && pending != null -> {
+                journal.append(taskId, Speaker.You, text)
+                journal.status(taskId, "Okay, leaving it as is.")
+            }
+            command == VoiceCommand.Stop -> {
+                journal.append(taskId, Speaker.You, text)
+                if (isRunning(taskId) || task.isActive) stop(taskId) else journal.status(taskId, "Claude isn't working on this right now.")
+            }
+            command == VoiceCommand.Status -> {
+                journal.append(taskId, Speaker.You, text)
+                journal.status(taskId, statusLine(task))
+            }
+            command == VoiceCommand.Merge -> {
+                journal.append(taskId, Speaker.You, text)
+                scope.launch(dispatcher) {
+                    runCatching { askToMerge(taskId) }.onFailure { journal.status(taskId, "Couldn't check the pull request. ${Failures.describe(it)}") }
+                }
+            }
+            else -> send(taskId, text, text)
+        }
+    }
+
+    /** Shows [shown] as the driver's line and sends [text] to Claude. */
+    private fun send(taskId: String, shown: String, text: String) {
+        val task = store.get(taskId) ?: return
+        journal.append(taskId, Speaker.You, shown)
         if (task.archived) journal.update(taskId) { it.copy(archived = false) }
         // Without a session the prompt joins the first message; otherwise it queues behind any unsent one.
         if (task.sessionId != null) {
@@ -169,6 +208,55 @@ class TaskEngine(
         val finished = store.all().filter { it.isFinished && !it.archived && !isRunning(it.id) }
         finished.forEach { clear(it.id) }
         return finished.size
+    }
+
+    /** One spoken sentence on where the task stands. */
+    private fun statusLine(task: Task): String {
+        val number = task.prNumber
+        return when {
+            isRunning(task.id) -> {
+                val last = task.messages.lastOrNull { it.speaker != Speaker.You }?.text?.trimEnd('.')
+                "Claude is working on it" + (last?.let { ". Latest: $it." } ?: ".")
+            }
+            task.interrupted -> "The connection dropped. I'm still trying to reconnect."
+            task.status == TaskStatus.Failed -> "This task failed. " + (task.messages.lastOrNull { it.speaker == Speaker.Status }?.text ?: "")
+            task.status == TaskStatus.Stopped -> "This task is stopped. Reply to give Claude a new direction."
+            number == null -> if (task.status == TaskStatus.NeedsInput) "Claude is waiting for your answer." else "Claude finished, and there's no pull request."
+            task.prState == PrState.Merged -> "Pull request $number is merged."
+            task.prState == PrState.Closed -> "Pull request $number was closed without merging."
+            else -> when (task.checks?.state) {
+                Checks.Failing -> "Checks failed on pull request $number. Say fix it to have Claude fix them."
+                Checks.Pending -> "Checks are still running on pull request $number."
+                Checks.Passing -> "Checks passed on pull request $number. Say merge it to merge."
+                else -> "Pull request $number is open for review."
+            }
+        }
+    }
+
+    /** Refreshes the pull request and its checks, then asks the driver to confirm the merge. */
+    private fun askToMerge(taskId: String) {
+        if (store.get(taskId)?.prNumber == null) return journal.status(taskId, "There's no pull request to merge yet.")
+        if (isRunning(taskId)) return journal.status(taskId, "Claude is still working. Say merge it once it's done.")
+        pullRequests.refresh(taskId)
+        val task = store.get(taskId) ?: return
+        val number = task.prNumber
+        val base = task.repo.defaultBranch
+        when {
+            task.prState == PrState.Merged -> journal.status(taskId, "Pull request $number is already merged.")
+            task.prState == PrState.Closed -> journal.status(taskId, "Pull request $number is closed.")
+            else -> when (task.checks?.state) {
+                Checks.Failing -> ask(taskId, PendingAction.FixChecks, "Checks failed on pull request $number, so I won't merge it. Say yes to have Claude fix them.")
+                Checks.Pending -> journal.status(taskId, "Checks are still running on pull request $number. Ask again when they finish.")
+                Checks.Passing -> ask(taskId, PendingAction.Merge, "Checks passed. Say yes to merge pull request $number into $base.")
+                Checks.Unknown -> ask(taskId, PendingAction.Merge, "I can't read the checks on pull request $number. Say yes to merge it into $base anyway.")
+                Checks.None, null -> ask(taskId, PendingAction.Merge, "No checks ran. Say yes to merge pull request $number into $base.")
+            }
+        }
+    }
+
+    private fun ask(taskId: String, action: PendingAction, question: String) {
+        journal.update(taskId) { it.copy(pending = action) }
+        journal.status(taskId, question)
     }
 
     /** Today's spend against the daily limit, for display. */
@@ -364,6 +452,15 @@ class TaskEngine(
         private const val RESUME_INTERVAL_MILLIS = 30_000L
         /** How long to keep trying automatically before leaving it to the network callback or the Try again button. */
         private const val AUTO_RESUME_MILLIS = 2 * 60 * 60 * 1000L
+
+        /** Sent when the driver asks Claude to fix the checks that failed on its pull request. */
+        fun fixChecksPrompt(task: Task): String {
+            val failing = task.checks?.failing.orEmpty()
+            return "The checks failed on pull request ${task.prNumber} after your last push" +
+                (if (failing.isEmpty()) "." else ": ${failing.joinToString(", ")}.") +
+                " You can't see their logs. Reproduce the failure by running the same build or tests here, fix it," +
+                " commit, and push to the same branch."
+        }
 
         fun titleFrom(request: String): String {
             val words = request.trim().split(Regex("\\s+"))

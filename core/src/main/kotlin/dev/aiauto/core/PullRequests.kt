@@ -82,7 +82,10 @@ internal class PullRequests(
             state == PrState.Merged && beforeState != PrState.Merged -> journal.status(taskId, "Pull request $number was merged.")
             state == PrState.Closed && beforeState != PrState.Closed -> journal.status(taskId, "Pull request $number was closed without merging.")
             state == PrState.Open && checks != null && checks.state != task.checks?.state -> when (checks.state) {
-                Checks.Failing -> journal.status(taskId, "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}.")
+                Checks.Failing -> {
+                    journal.update(taskId) { it.copy(pending = PendingAction.FixChecks) }
+                    journal.status(taskId, "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}. Say yes to have Claude fix them.")
+                }
                 Checks.Passing -> journal.status(
                     taskId,
                     "Checks passed on pull request $number." + when {

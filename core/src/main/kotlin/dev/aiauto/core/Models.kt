@@ -61,6 +61,10 @@ data class ChecksSummary(
     val total: Int = 0,
 )
 
+/** Something the app asked the driver, waiting for a spoken yes or no. */
+@Serializable
+enum class PendingAction { Merge, FixChecks }
+
 @Serializable
 enum class Speaker { You, Claude, Status }
 
@@ -103,6 +107,8 @@ data class Task(
     val costUsd: Double = 0.0,
     /** Put away by the user: shown on the Archived tab instead of the main list. */
     val archived: Boolean = false,
+    /** A yes-or-no question the app asked, answered by the next reply. */
+    val pending: PendingAction? = null,
 ) {
     /** A pull request exists and hasn't been merged or closed yet. */
     val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open

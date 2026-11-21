@@ -52,6 +52,19 @@ The limit is also set as the session's budget on Anthropic's side, so it holds e
 While you're in the car, the app reads Claude's messages and short progress notes like "Building or testing"
 aloud, ducking your music while it talks. You can turn this off in Settings.
 
+## Voice commands
+
+When you reply to a task, the app handles a few short phrases itself without waiting for Claude:
+
+- **"Status"** tells you where the task is.
+- **"Stop"** interrupts Claude.
+- **"Merge it"** refreshes the pull request's checks and asks you to confirm. Say **"yes"** to merge or **"no"** to
+  leave it. If checks failed, it won't merge. It offers to have Claude fix them instead.
+- **"Fix it"** sends the names of the failing checks to Claude. When the app announces failed checks, you can also
+  just say **"yes"**.
+
+Anything longer goes to Claude as usual, so "merge the two settings screens" is still a coding request.
+
 ## Setup
 
 1. **Get the APK.** Download `aiauto-vX.Y.Z.apk` from the latest
