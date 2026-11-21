@@ -11,6 +11,8 @@
   task. Conflicting pull requests are never auto-merged.
 - Tasks that need a reply are listed first, merge results are reported, and new tasks start on the last-used repo.
 - Say a repo's name to the car assistant to add it.
+- After Claude's answer is read aloud on the car's Talk screen, the app listens for your reply and sends it when you
+  stop talking, so no tap is needed.
 - Swipe a task card on the phone to archive it, with undo.
 - The repository delete button is gone from Settings.
 
