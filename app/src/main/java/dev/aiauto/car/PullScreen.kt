@@ -14,6 +14,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import dev.aiauto.core.Checks
+import dev.aiauto.core.Failures
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.graph
@@ -88,10 +89,14 @@ class PullScreen(carContext: CarContext, private val repo: RepoRef, private val 
         merging = true
         invalidate()
         lifecycleScope.launch {
-            val message = withContext(Dispatchers.IO) { g.mergePull(repo, number) }
+            val message = withContext(Dispatchers.IO) {
+                runCatching { g.mergePull(repo, number) }.getOrElse { "Couldn't merge pull request $number. ${Failures.describe(it)}" }
+            }
             merging = false
-            CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
-            g.speaker.speak(message)
+            runCatching {
+                CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
+                g.speaker.speak(message)
+            }
             invalidate()
         }
     }

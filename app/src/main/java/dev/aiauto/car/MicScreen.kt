@@ -67,9 +67,11 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
         heard = spoken
         show(State.Thinking, "Thinking…")
         thinking = lifecycleScope.launch {
-            val reply = withContext(Dispatchers.IO) { g.assistant.ask(spoken) }
+            val reply = withContext(Dispatchers.IO) {
+                runCatching { g.assistant.ask(spoken) }.getOrElse { "Sorry, that didn't go through. Try again." }
+            }
             show(State.Idle, reply)
-            g.speaker.speak(reply)
+            runCatching { g.speaker.speak(reply) }
         }
     }
 

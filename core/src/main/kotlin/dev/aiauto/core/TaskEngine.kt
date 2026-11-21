@@ -116,13 +116,35 @@ class TaskEngine(
         store.all().filter { it.status == TaskStatus.Failed && it.interrupted }.forEach { retry(it.id) }
     }
 
+    /**
+     * Retries tasks cut off by a lost connection, without waiting for the network callback, which doesn't fire
+     * when the phone stayed online but the connection was flaky or a server was down. Call it regularly.
+     * Each task waits [RESUME_INTERVAL_MILLIS] between tries, and gives up after [AUTO_RESUME_MILLIS].
+     */
+    fun resumeInterrupted() {
+        val now = clock()
+        store.all()
+            .filter { waitingToReconnect(it, now) && now - it.updatedMillis >= RESUME_INTERVAL_MILLIS }
+            .forEach { launchTurn(it.id) }
+    }
+
+    /** True while some task is cut off and still being retried, so the app should stay awake. */
+    fun isReconnecting(): Boolean {
+        val now = clock()
+        return store.all().any { waitingToReconnect(it, now) }
+    }
+
+    private fun waitingToReconnect(task: Task, now: Long): Boolean =
+        task.status == TaskStatus.Failed && task.interrupted && !isRunning(task.id) &&
+            now - (task.interruptedSinceMillis ?: task.updatedMillis) < AUTO_RESUME_MILLIS
+
     /** Stops a task that's working: Claude is interrupted and the task waits for a new prompt. */
     fun stop(taskId: String) {
         val wasRunning = running.remove(taskId)?.also { it.cancel() } != null
         val task = store.get(taskId) ?: return
         val active = task.status == TaskStatus.Working || task.status == TaskStatus.Starting || task.interrupted
         if (!wasRunning && !active) return
-        update(taskId) { it.copy(status = TaskStatus.Stopped, interrupted = false, pendingPrompt = null) }
+        update(taskId) { it.copy(status = TaskStatus.Stopped, interrupted = false, interruptedSinceMillis = null, pendingPrompt = null) }
         append(taskId, Speaker.Status, "Stopped. Reply to give Claude a new direction.", notify = false)
         val sessionId = task.sessionId ?: return
         scope.launch(dispatcher) {
@@ -290,10 +312,11 @@ class TaskEngine(
                 followUntilDone(client, taskId)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Catch everything, not just exceptions, so a task never stays stuck on "Working" with nothing running.
                 // Stopped or cleared by the user while a call was in flight: don't overwrite that with an error.
                 if (currentCoroutineContext().isActive) {
-                    if (Failures.isTransient(e)) interrupt(taskId, e) else fail(taskId, Failures.describe(e))
+                    runCatching { if (Failures.isTransient(e)) interrupt(taskId, e) else fail(taskId, Failures.describe(e)) }
                 }
             } finally {
                 runCatching { claude?.close() }
@@ -445,7 +468,7 @@ class TaskEngine(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 append(taskId, Speaker.Status, "Couldn't open the pull request. ${Failures.describe(e)}")
             }
         } else if (token != null && task.hasOpenPr) {
@@ -454,12 +477,14 @@ class TaskEngine(
             update(taskId) { it.copy(prOpenedMillis = clock()) }
             try {
                 refreshPullRequest(taskId)
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
                 // The regular refresh tries again later.
             }
         }
         val asked = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.endsWith("?") == true
-        update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done) }
+        update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done, interruptedSinceMillis = null) }
     }
 
     private fun prBody(task: Task): String = buildString {
@@ -474,13 +499,18 @@ class TaskEngine(
 
     private fun fail(taskId: String, reason: String) {
         append(taskId, Speaker.Status, reason)
-        update(taskId) { it.copy(status = TaskStatus.Failed, interrupted = false) }
+        update(taskId) { it.copy(status = TaskStatus.Failed, interrupted = false, interruptedSinceMillis = null) }
     }
 
-    /** Stopped by a connection problem or a busy server. Claude may still be working, so this is resumable. */
-    private fun interrupt(taskId: String, e: Exception) {
-        append(taskId, Speaker.Status, "${Failures.describe(e)} Claude may still be working. I'll reconnect when the connection is back, or tap Try again.")
-        update(taskId) { it.copy(status = TaskStatus.Failed, interrupted = true) }
+    /**
+     * Stopped by a connection problem or a busy server. Claude may still be working, so this is resumable.
+     * Only the first drop in a run is announced, so automatic retries don't repeat the message every time.
+     */
+    private fun interrupt(taskId: String, e: Throwable) {
+        if (store.get(taskId)?.interruptedSinceMillis == null) {
+            append(taskId, Speaker.Status, "${Failures.describe(e)} Claude may still be working. I'll keep trying to reconnect, or tap Try again.")
+        }
+        update(taskId) { it.copy(status = TaskStatus.Failed, interrupted = true, interruptedSinceMillis = it.interruptedSinceMillis ?: clock()) }
     }
 
     /** Progress notes replace the previous one so the conversation doesn't fill with "Editing files". */
@@ -514,6 +544,10 @@ class TaskEngine(
         private const val MAX_RECONNECTS = 8
         private const val MAX_QUIET_RECONNECTS = 30
         private const val QUIET_RECONNECT_MILLIS = 1_000L
+        /** How long to wait between automatic tries for a task cut off by a lost connection. */
+        private const val RESUME_INTERVAL_MILLIS = 30_000L
+        /** How long to keep trying automatically before leaving it to the network callback or the Try again button. */
+        private const val AUTO_RESUME_MILLIS = 2 * 60 * 60 * 1000L
         /** How long after opening a pull request the app keeps watching its checks. */
         private const val WATCH_MILLIS = 3 * 60 * 60 * 1000L
         private const val NO_CHECKS_GRACE_MILLIS = 10 * 60 * 1000L
