@@ -24,6 +24,9 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.launch
 
 /** App-wide objects. Created once in [AiAutoApp]. */
 class Graph(context: Context) {
@@ -175,6 +178,17 @@ class Graph(context: Context) {
 
     /** True while a task is running or waiting to reconnect, so the foreground service should be up. */
     fun hasActiveWork(): Boolean = tasks.all().any { engine.isRunning(it.id) } || engine.isReconnecting()
+
+    /** Keeps the home-screen widget in step with the task list, at most about once a second. */
+    fun watchWidget(context: Context) {
+        val app = context.applicationContext
+        scope.launch {
+            tasks.tasks.conflate().collect {
+                dev.aiauto.widget.TasksWidget.refresh(app)
+                delay(1_000)
+            }
+        }
+    }
 
     /** Resumes tasks that stopped because the connection dropped, as soon as the phone is back online. */
     fun watchNetwork(context: Context) {
