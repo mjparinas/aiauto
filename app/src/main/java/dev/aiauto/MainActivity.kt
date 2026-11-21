@@ -216,9 +216,12 @@ class MainActivity : ComponentActivity() {
                         },
                         onCheckUpdate = {
                             settings = settings.copy(busy = true, message = "Checking for updates…")
+                            android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
                             scope.launch {
                                 val result = (application as AiAutoApp).updater.checkNow()
                                 settings = settings.copy(busy = false, message = result)
+                                // The inline message sits at the bottom of a long page and is easy to miss.
+                                android.widget.Toast.makeText(this@MainActivity, result, android.widget.Toast.LENGTH_LONG).show()
                             }
                         },
                     )
