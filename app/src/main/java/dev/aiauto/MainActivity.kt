@@ -194,6 +194,8 @@ class MainActivity : ComponentActivity() {
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
                         onQuietMode = { g.settings.quietMode = it; settings = settings.copy(quietMode = it) },
                         onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },
+                        onAutoFixChecks = { g.settings.autoFixChecks = it; settings = settings.copy(autoFixChecks = it) },
+                        onAutoFixConflicts = { g.settings.autoFixConflicts = it; settings = settings.copy(autoFixConflicts = it) },
                         onDailyLimit = {
                             g.settings.dailyLimitUsd = it
                             settings = settings.copy(
@@ -225,6 +227,8 @@ class MainActivity : ComponentActivity() {
         readAloud = graph.settings.readAloudInCar,
         quietMode = graph.settings.quietMode,
         autoMerge = graph.settings.autoMerge,
+        autoFixChecks = graph.settings.autoFixChecks,
+        autoFixConflicts = graph.settings.autoFixConflicts,
         dailyLimitUsd = graph.settings.dailyLimitUsd,
         spentTodayUsd = graph.settings.spentTodayUsd,
     )

@@ -26,4 +26,10 @@ interface EngineConfig {
 
     /** Merge a task's pull request once its checks pass. */
     fun autoMerge(): Boolean = false
+
+    /** Ask Claude to fix failing checks on its pull request without waiting for the driver. */
+    fun autoFixChecks(): Boolean = false
+
+    /** Ask Claude to resolve merge conflicts on its pull request without waiting for the driver. */
+    fun autoFixConflicts(): Boolean = false
 }

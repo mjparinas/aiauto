@@ -44,7 +44,7 @@ class TaskEngine(
 ) {
     private val journal = TaskJournal(store, clock, onMessage, onProgress, config::quietMode)
     private val spending = SpendingLimit(store, config, journal)
-    private val pullRequests = PullRequests(store, config, journal, clock, githubFactory)
+    private val pullRequests = PullRequests(store, config, journal, clock, githubFactory, ::autoFix)
 
     private val running = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
@@ -81,7 +81,10 @@ class TaskEngine(
         val pending = task.pending
         if (pending != null) journal.update(taskId) { it.copy(pending = null) }
         val checksFailing = task.hasOpenPr && task.checks?.state == Checks.Failing
+        val conflicting = task.hasOpenPr && task.conflicts
         when {
+            command == VoiceCommand.Yes && pending == PendingAction.FixConflicts ||
+                command == VoiceCommand.FixBuild && conflicting -> send(taskId, text, fixConflictsPrompt(task))
             command == VoiceCommand.Yes && pending == PendingAction.FixChecks ||
                 command == VoiceCommand.FixBuild && checksFailing -> send(taskId, text, fixChecksPrompt(task))
             command == VoiceCommand.Yes && pending == PendingAction.Merge -> {
@@ -110,16 +113,32 @@ class TaskEngine(
         }
     }
 
-    /** Shows [shown] as the driver's line and sends [text] to Claude. */
-    private fun send(taskId: String, shown: String, text: String) {
+    /** Shows [shown] as the driver's line and sends [text] to Claude. With no [shown], the app is sending it on its own. */
+    private fun send(taskId: String, shown: String?, text: String) {
         val task = store.get(taskId) ?: return
-        journal.append(taskId, Speaker.You, shown)
+        if (shown != null) {
+            journal.append(taskId, Speaker.You, shown)
+            // The driver is back in the loop, so automatic fixes may start over.
+            journal.update(taskId) { it.copy(autoFixes = 0) }
+        }
         if (task.archived) journal.update(taskId) { it.copy(archived = false) }
         // Without a session the prompt joins the first message; otherwise it queues behind any unsent one.
         if (task.sessionId != null) {
             journal.update(taskId) { it.copy(pendingPrompt = listOfNotNull(it.pendingPrompt, text).joinToString("\n\n")) }
         }
         launchTurn(taskId)
+    }
+
+    /**
+     * Sends a fix for failing checks or merge conflicts that the app found on its own. A refresh can run inside
+     * the task's own turn, so wait for that turn to end first, and skip it if the driver started another one.
+     */
+    private fun autoFix(taskId: String, prompt: String) {
+        val current = running[taskId]
+        scope.launch(dispatcher) {
+            current?.join()
+            if (!isRunning(taskId)) send(taskId, null, prompt)
+        }
     }
 
     /** Picks a stopped task back up: creates its session if it never got one, resends unsent prompts, and reattaches. */
@@ -224,6 +243,7 @@ class TaskEngine(
             number == null -> if (task.status == TaskStatus.NeedsInput) "Claude is waiting for your answer." else "Claude finished, and there's no pull request."
             task.prState == PrState.Merged -> "Pull request $number is merged."
             task.prState == PrState.Closed -> "Pull request $number was closed without merging."
+            task.conflicts -> "Pull request $number has merge conflicts. Say fix it to have Claude fix them."
             else -> when (task.checks?.state) {
                 Checks.Failing -> "Checks failed on pull request $number. Say fix it to have Claude fix them."
                 Checks.Pending -> "Checks are still running on pull request $number."
@@ -244,6 +264,7 @@ class TaskEngine(
         when {
             task.prState == PrState.Merged -> journal.status(taskId, "Pull request $number is already merged.")
             task.prState == PrState.Closed -> journal.status(taskId, "Pull request $number is closed.")
+            task.conflicts -> ask(taskId, PendingAction.FixConflicts, "Pull request $number has merge conflicts with $base, so it can't merge. Say yes to have Claude fix them.")
             else -> when (task.checks?.state) {
                 Checks.Failing -> ask(taskId, PendingAction.FixChecks, "Checks failed on pull request $number, so I won't merge it. Say yes to have Claude fix them.")
                 Checks.Pending -> journal.status(taskId, "Checks are still running on pull request $number. Ask again when they finish.")
@@ -460,6 +481,13 @@ class TaskEngine(
                 (if (failing.isEmpty()) "." else ": ${failing.joinToString(", ")}.") +
                 " You can't see their logs. Reproduce the failure by running the same build or tests here, fix it," +
                 " commit, and push to the same branch."
+        }
+
+        /** Sent when the pull request conflicts with its base branch. */
+        fun fixConflictsPrompt(task: Task): String {
+            val base = task.repo.defaultBranch
+            return "Pull request ${task.prNumber} has merge conflicts with $base. Fetch the latest $base and merge it into your branch." +
+                " Resolve every conflict so both sides' changes still work, run the build and tests, commit, and push to the same branch."
         }
 
         fun titleFrom(request: String): String {

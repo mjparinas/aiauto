@@ -2,13 +2,17 @@ package dev.aiauto.core
 
 import java.util.concurrent.ConcurrentHashMap
 
-/** Opens each task's pull request, follows its checks, and merges it when auto-merge is on. */
+/**
+ * Opens each task's pull request, follows its checks, and merges it when auto-merge is on.
+ * When the auto-fix settings are on, failing checks and merge conflicts go straight back to Claude through [autoFix].
+ */
 internal class PullRequests(
     private val store: TaskStore,
     private val config: EngineConfig,
     private val journal: TaskJournal,
     private val clock: () -> Long,
     private val githubFactory: (String) -> GitHub,
+    private val autoFix: (taskId: String, prompt: String) -> Unit = { _, _ -> },
 ) {
     private val mergeRefusals = ConcurrentHashMap<String, String>()
 
@@ -18,7 +22,7 @@ internal class PullRequests(
         if (now - (task.prOpenedMillis ?: task.updatedMillis) > WATCH_MILLIS) return false
         return when (task.checks?.state) {
             null, Checks.Pending, Checks.None -> true
-            Checks.Passing -> config.autoMerge()
+            Checks.Passing -> config.autoMerge() || config.autoFixConflicts()
             Checks.Failing, Checks.Unknown -> false
         }
     }
@@ -59,7 +63,8 @@ internal class PullRequests(
      * so a fix for failing checks gets watched and merged instead of staying stuck on the old result.
      */
     fun rewatch(taskId: String) {
-        journal.update(taskId) { it.copy(prOpenedMillis = clock()) }
+        // New commits mean GitHub works out mergeability again; a conflict that's still there gets reported anew.
+        journal.update(taskId) { it.copy(prOpenedMillis = clock(), conflicts = false) }
         // On failure the regular refresh tries again later.
         runCatching { refresh(taskId) }
     }
@@ -73,18 +78,27 @@ internal class PullRequests(
         val pr = github.pull(task.repo, number)
         val state = pr.prState
         val checks = if (state == PrState.Open && pr.head.sha.isNotEmpty()) github.checks(task.repo, pr.head.sha) else task.checks
-        journal.update(taskId) { it.copy(prState = state, checks = checks, githubAutoMerge = pr.hasGitHubAutoMerge, prUrl = pr.htmlUrl) }
+        // While GitHub is still working out mergeability, keep what it said last.
+        val conflicts = state == PrState.Open && (pr.hasConflicts ?: task.conflicts)
+        journal.update(taskId) { it.copy(prState = state, checks = checks, githubAutoMerge = pr.hasGitHubAutoMerge, prUrl = pr.htmlUrl, conflicts = conflicts) }
 
-        val willMerge = state == PrState.Open && config.autoMerge() && !pr.draft && !pr.hasGitHubAutoMerge &&
+        val willMerge = state == PrState.Open && config.autoMerge() && !pr.draft && !pr.hasGitHubAutoMerge && !conflicts &&
             checks != null && readyToMerge(checks, task, clock())
+        val fixingConflicts = conflicts && !task.conflicts && conflictsFound(taskId, number)
         val beforeState = task.prState ?: PrState.Open
         when {
             state == PrState.Merged && beforeState != PrState.Merged -> journal.status(taskId, "Pull request $number was merged.")
             state == PrState.Closed && beforeState != PrState.Closed -> journal.status(taskId, "Pull request $number was closed without merging.")
             state == PrState.Open && checks != null && checks.state != task.checks?.state -> when (checks.state) {
                 Checks.Failing -> {
-                    journal.update(taskId) { it.copy(pending = PendingAction.FixChecks) }
-                    journal.status(taskId, "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}. Say yes to have Claude fix them.")
+                    val failed = "Checks failed on pull request $number: ${checks.failing.take(3).joinToString(", ")}."
+                    // A conflict fix pushes new commits, which run the checks again, so don't ask for both at once.
+                    if (!fixingConflicts && tryAutoFix(taskId, config.autoFixChecks(), TaskEngine.fixChecksPrompt(store.get(taskId) ?: task))) {
+                        journal.status(taskId, "$failed Asking Claude to fix them.")
+                    } else {
+                        journal.update(taskId) { it.copy(pending = PendingAction.FixChecks) }
+                        journal.status(taskId, "$failed Say yes to have Claude fix them.")
+                    }
                 }
                 Checks.Passing -> journal.status(
                     taskId,
@@ -121,6 +135,27 @@ internal class PullRequests(
         return message
     }
 
+    /** Announces new merge conflicts and fixes them or asks to. Returns true when Claude was asked to fix them. */
+    private fun conflictsFound(taskId: String, number: Int): Boolean {
+        val task = store.get(taskId) ?: return false
+        val base = task.repo.defaultBranch
+        if (tryAutoFix(taskId, config.autoFixConflicts(), TaskEngine.fixConflictsPrompt(task))) {
+            journal.status(taskId, "Pull request $number has merge conflicts with $base. Asking Claude to fix them.")
+            return true
+        }
+        journal.update(taskId) { it.copy(pending = PendingAction.FixConflicts) }
+        journal.status(taskId, "Pull request $number has merge conflicts with $base. Say yes to have Claude fix them.")
+        return false
+    }
+
+    /** Hands [prompt] to Claude when [enabled] and the task hasn't used up its automatic fixes. */
+    private fun tryAutoFix(taskId: String, enabled: Boolean, prompt: String): Boolean {
+        if (!enabled || (store.get(taskId)?.autoFixes ?: MAX_AUTO_FIXES) >= MAX_AUTO_FIXES) return false
+        journal.update(taskId) { it.copy(autoFixes = it.autoFixes + 1, pending = null) }
+        autoFix(taskId, prompt)
+        return true
+    }
+
     private fun readyToMerge(checks: ChecksSummary, task: Task, now: Long): Boolean = when (checks.state) {
         Checks.Passing -> true
         // A repo without CI: give checks time to show up before treating "none" as green.
@@ -142,5 +177,7 @@ internal class PullRequests(
         /** How long after opening a pull request the app keeps watching its checks. */
         const val WATCH_MILLIS = 3 * 60 * 60 * 1000L
         const val NO_CHECKS_GRACE_MILLIS = 10 * 60 * 1000L
+        /** Automatic fix attempts per task before the app goes back to asking the driver. */
+        const val MAX_AUTO_FIXES = 3
     }
 }

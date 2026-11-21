@@ -48,6 +48,8 @@ class Graph(context: Context) {
             override fun spentTodayUsd() = settings.spentTodayUsd
             override fun addSpend(usd: Double) = settings.addSpend(usd)
             override fun autoMerge() = settings.autoMerge
+            override fun autoFixChecks() = settings.autoFixChecks
+            override fun autoFixConflicts() = settings.autoFixConflicts
         },
         scope = scope,
         onMessage = { task, message ->
