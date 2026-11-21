@@ -24,7 +24,8 @@ as messages that the car reads aloud.
 
 Tap **Talk** on the car screen and say anything. Claude (Opus 5.5, low effort for quick answers) replies out loud
 through the car speakers, and can start a coding task in one of your saved repos or answer a running task when you
-ask it to. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
+ask it to. You can also add a repo by voice: say something like "add my repo aiauto" and Claude finds it among the
+repos your GitHub token can push to and saves it. **New chat** starts the conversation over. Each answer counts toward the daily spending limit.
 
 If the car only shows AIAuto's messaging view ("No new messages during this drive"), Android Auto is hiding the
 app screen, usually because **Unknown sources** is off (see setup below). You can still talk to Claude there: each
