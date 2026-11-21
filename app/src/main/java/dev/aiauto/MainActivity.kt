@@ -214,6 +214,13 @@ class MainActivity : ComponentActivity() {
                                 message = it?.let { v -> "Daily limit set to ${dev.aiauto.core.SpokenStatus.money(v)}." } ?: "No daily limit.",
                             )
                         },
+                        onCheckUpdate = {
+                            settings = settings.copy(busy = true, message = "Checking for updates…")
+                            scope.launch {
+                                val result = (application as AiAutoApp).updater.checkNow()
+                                settings = settings.copy(busy = false, message = result)
+                            }
+                        },
                     )
                 }
             }
@@ -243,6 +250,7 @@ class MainActivity : ComponentActivity() {
         autoRelease = graph.settings.autoReleaseSince != null,
         dailyLimitUsd = graph.settings.dailyLimitUsd,
         spentTodayUsd = graph.settings.spentTodayUsd,
+        version = (application as AiAutoApp).updater.currentVersion,
         themeMode = enumOrDefault(graph.settings.themeMode, ThemeMode.System),
         accent = enumOrDefault(graph.settings.accent, Accent.Clay),
     )

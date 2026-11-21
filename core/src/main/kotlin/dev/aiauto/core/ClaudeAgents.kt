@@ -117,7 +117,7 @@ class ClaudeAgents(apiKey: String) : AgentClient {
         )
         val agent = client.beta().agents().create(
             AgentCreateParams.builder()
-                .name("AIAuto coding agent")
+                .name("Cruise Control coding agent")
                 .model(BetaManagedAgentsModel.of(MODEL))
                 .system(SYSTEM_PROMPT)
                 .addTool(

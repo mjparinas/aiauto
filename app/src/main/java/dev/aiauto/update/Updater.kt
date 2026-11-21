@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -56,6 +57,25 @@ class Updater(private val context: Context, private val scope: CoroutineScope) {
                 cached = update
                 if (update != null && _state.value !is State.Downloading) _state.value = State.Available(update)
             }
+        }
+    }
+
+    /**
+     * Asks GitHub right away, for the Check for updates button in Settings. A newer release shows the
+     * usual update prompt. Returns a short line to show under the button.
+     */
+    suspend fun checkNow(): String {
+        if (_state.value is State.Downloading) return "An update is already downloading."
+        return withContext(Dispatchers.IO) {
+            runCatching { source.newerThan(currentVersion) }.fold(
+                { update ->
+                    lastFetchMillis = System.currentTimeMillis()
+                    cached = update
+                    if (update != null && _state.value !is State.Downloading) _state.value = State.Available(update)
+                    update?.let { "${it.tag} is available." } ?: "You're on the latest version."
+                },
+                { "Couldn't check for updates. ${Failures.describe(it)}" },
+            )
         }
     }
 

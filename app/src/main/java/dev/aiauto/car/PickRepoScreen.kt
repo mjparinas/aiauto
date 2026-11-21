@@ -54,7 +54,7 @@ class PickRepoScreen(carContext: CarContext) : Screen(carContext) {
                     title = "New task in ${repo.name}",
                     fallback = {
                         g.notifier.askForNewTask(repo)
-                        CarToast.makeText(carContext, "Reply to the AIAuto message with your request", CarToast.LENGTH_LONG).show()
+                        CarToast.makeText(carContext, "Reply to the Cruise Control message with your request", CarToast.LENGTH_LONG).show()
                     },
                 ) { text ->
                     val task = g.engine.start(repo, text)

@@ -84,7 +84,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
     /**
      * The "Talk to Claude" conversation for Android Auto's messaging view. Replying to it by voice asks
      * Claude directly, and the answer comes back in the same conversation and is read aloud. This works
-     * even when the car only shows AIAuto as a messaging app.
+     * even when the car only shows Cruise Control as a messaging app.
      */
     @Synchronized
     fun postChat(fromClaude: String? = null, fromYou: String? = null) {
@@ -177,7 +177,7 @@ class Notifier(private val context: Context, private val settings: Settings, pri
         const val CHAT_TARGET = "chat"
         private const val CHAT_ID = 2
         private const val CHAT_HELLO = "Hi, it's Claude. Reply to this message and say anything. " +
-            "To skip the Send button, turn on Unknown sources in Android Auto and use Talk on the AIAuto screen."
+            "To skip the Send button, turn on Unknown sources in Android Auto and use Talk on the Cruise Control screen."
         private const val MAX_MESSAGES = 8
         private const val PROGRESS_GAP_MILLIS = 15_000L
     }

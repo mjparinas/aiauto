@@ -49,10 +49,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.version || github.ref_name }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "aiauto-$TAG.apk"
+          cp app/build/outputs/apk/release/app-release.apk "cruise-control-$TAG.apk"
           # The app's auto-release may have created the release already; then just attach the APK.
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "aiauto-$TAG.apk" --clobber
+            gh release upload "$TAG" "cruise-control-$TAG.apk" --clobber
           else
-            gh release create "$TAG" "aiauto-$TAG.apk" --title "AIAuto $TAG" --target "$GITHUB_SHA" --generate-notes
+            gh release create "$TAG" "cruise-control-$TAG.apk" --title "Cruise Control $TAG" --target "$GITHUB_SHA" --generate-notes
           fi
