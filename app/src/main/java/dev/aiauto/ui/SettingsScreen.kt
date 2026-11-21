@@ -48,6 +48,8 @@ data class SettingsState(
     val readAloud: Boolean,
     val quietMode: Boolean,
     val autoMerge: Boolean,
+    val autoFixChecks: Boolean,
+    val autoFixConflicts: Boolean,
     val dailyLimitUsd: Double?,
     val spentTodayUsd: Double,
     val busy: Boolean = false,
@@ -65,6 +67,8 @@ fun SettingsScreen(
     onReadAloud: (Boolean) -> Unit,
     onQuietMode: (Boolean) -> Unit,
     onAutoMerge: (Boolean) -> Unit,
+    onAutoFixChecks: (Boolean) -> Unit,
+    onAutoFixConflicts: (Boolean) -> Unit,
     onDailyLimit: (Double?) -> Unit,
 ) {
     var limitText by remember { mutableStateOf(state.dailyLimitUsd?.let { "%.2f".format(java.util.Locale.US, it).removeSuffix(".00") }.orEmpty()) }
@@ -166,6 +170,28 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.autoMerge, onCheckedChange = onAutoMerge)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Fix merge conflicts automatically", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When a pull request conflicts with the main branch, Claude merges it in, resolves the conflicts and pushes, without asking first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoFixConflicts, onCheckedChange = onAutoFixConflicts)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Fix failing checks automatically", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When tests, the build or any other CI check fails, Claude fixes it and pushes, without asking first. Up to three tries per task before it asks you.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoFixChecks, onCheckedChange = onAutoFixChecks)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)

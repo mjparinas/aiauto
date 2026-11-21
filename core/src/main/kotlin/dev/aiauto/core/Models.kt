@@ -63,7 +63,7 @@ data class ChecksSummary(
 
 /** Something the app asked the driver, waiting for a spoken yes or no. */
 @Serializable
-enum class PendingAction { Merge, FixChecks }
+enum class PendingAction { Merge, FixChecks, FixConflicts }
 
 @Serializable
 enum class Speaker { You, Claude, Status }
@@ -109,6 +109,10 @@ data class Task(
     val archived: Boolean = false,
     /** A yes-or-no question the app asked, answered by the next reply. */
     val pending: PendingAction? = null,
+    /** GitHub says the pull request can't merge cleanly into the base branch. */
+    val conflicts: Boolean = false,
+    /** Fixes the app asked Claude for on its own since the driver last spoke, so it can't loop forever. */
+    val autoFixes: Int = 0,
 ) {
     /** A pull request exists and hasn't been merged or closed yet. */
     val hasOpenPr: Boolean get() = prNumber != null && (prState ?: PrState.Open) == PrState.Open

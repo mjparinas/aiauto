@@ -25,6 +25,8 @@ class EngineControlsTest {
         var limit: Double? = null
         var spent = 0.0
         var merge = false
+        var fixChecks = false
+        var fixConflicts = false
         override fun anthropicKey() = "key"
         override fun githubToken() = "token"
         override fun agentSetup() = AgentSetup("agent", 1, "env")
@@ -33,6 +35,8 @@ class EngineControlsTest {
         override fun spentTodayUsd() = spent
         override fun addSpend(usd: Double) { spent += usd }
         override fun autoMerge() = merge
+        override fun autoFixChecks() = fixChecks
+        override fun autoFixConflicts() = fixConflicts
     }
 
     private class FakeClaude : AgentClient {
@@ -46,7 +50,8 @@ class EngineControlsTest {
 
         override fun createSetup() = AgentSetup("agent", 1, "env")
         override fun createSession(setup: AgentSetup, task: Task, githubToken: String) = "session-${task.id}"
-        override fun sendPrompt(sessionId: String, prompt: String) { sent += prompt }
+        var onSend: (String) -> Unit = {}
+        override fun sendPrompt(sessionId: String, prompt: String) { sent += prompt; onSend(prompt) }
         override fun follow(
             sessionId: String,
             seenEventIds: MutableSet<String>,
@@ -267,6 +272,71 @@ class EngineControlsTest {
         now += 11 * 60 * 1000L
         engine.refreshPullRequest(task.id)
         assertEquals(listOf(7), github.merges)
+    }
+
+    @Test fun sendsFailingChecksBackToClaudeWhenAutoFixIsOn() {
+        config.fixChecks = true
+        val engine = engine()
+        val task = engine.start(repo, "add a feature")
+        github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("unit tests"), total = 1)
+        engine.refreshPullRequest(task.id)
+        assertTrue(said.any { it == "Checks failed on pull request 7: unit tests. Asking Claude to fix them." })
+        assertTrue(claude.sent.last().contains("The checks failed on pull request 7"))
+        assertNull(store.get(task.id)!!.pending)
+    }
+
+    @Test fun asksBeforeFixingChecksWhenAutoFixIsOff() {
+        val engine = engine()
+        val task = engine.start(repo, "add a feature")
+        github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("unit tests"), total = 1)
+        engine.refreshPullRequest(task.id)
+        assertEquals(1, claude.sent.size)
+        assertEquals(PendingAction.FixChecks, store.get(task.id)!!.pending)
+    }
+
+    @Test fun stopsFixingChecksAutomaticallyAfterThreeTries() {
+        config.fixChecks = true
+        val engine = engine()
+        val task = engine.start(repo, "add a feature")
+        repeat(4) {
+            github.checksResult = ChecksSummary(Checks.Pending, total = 1)
+            engine.refreshPullRequest(task.id)
+            github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("build"), total = 1)
+            engine.refreshPullRequest(task.id)
+        }
+        // The first request plus three automatic fixes, then the app asks instead.
+        assertEquals(4, claude.sent.size)
+        assertEquals(PendingAction.FixChecks, store.get(task.id)!!.pending)
+        assertTrue(said.last().contains("Say yes to have Claude fix them"))
+    }
+
+    @Test fun resolvesMergeConflictsAutomaticallyThenMerges() {
+        config.merge = true
+        config.fixConflicts = true
+        val engine = engine()
+        val task = engine.start(repo, "add a feature")
+        github.pr = github.pr.copy(mergeable = false, mergeableState = "dirty")
+        github.checksResult = ChecksSummary(Checks.Passing, total = 1)
+        // Claude's push clears the conflict.
+        claude.onSend = { if ("merge conflicts" in it) github.pr = github.pr.copy(mergeable = true, mergeableState = "clean") }
+        engine.refreshPullRequest(task.id)
+        assertTrue(said.any { it == "Pull request 7 has merge conflicts with main. Asking Claude to fix them." })
+        assertTrue(claude.sent.last().contains("merge conflicts with main"))
+        assertEquals(listOf(7), github.merges)
+    }
+
+    @Test fun neverMergesAConflictingPullRequest() {
+        config.merge = true
+        val engine = engine()
+        val task = engine.start(repo, "add a feature")
+        github.pr = github.pr.copy(mergeable = false, mergeableState = "dirty")
+        github.checksResult = ChecksSummary(Checks.Passing, total = 1)
+        engine.refreshPullRequest(task.id)
+        assertTrue(github.merges.isEmpty())
+        assertEquals(PendingAction.FixConflicts, store.get(task.id)!!.pending)
+        assertEquals(1, claude.sent.size)
+        engine.prompt(task.id, "yes")
+        assertTrue(claude.sent.last().contains("merge conflicts with main"))
     }
 
     @Test fun reportsARefusedMergeOnlyOnce() {

@@ -21,6 +21,8 @@ data class PullRequest(
     val draft: Boolean = false,
     /** Null while GitHub is still working it out, and always null in list results. */
     val mergeable: Boolean? = null,
+    /** "dirty" means there are merge conflicts. */
+    @SerialName("mergeable_state") val mergeableState: String? = null,
     @SerialName("node_id") val nodeId: String = "",
     val head: Head = Head(),
     @SerialName("auto_merge") val autoMerge: kotlinx.serialization.json.JsonElement? = null,
@@ -32,6 +34,13 @@ data class PullRequest(
         merged -> PrState.Merged
         state == "closed" -> PrState.Closed
         else -> PrState.Open
+    }
+
+    /** True when GitHub has worked out that it conflicts with the base branch, null while it's still checking. */
+    val hasConflicts: Boolean? get() = when {
+        mergeableState == "dirty" -> true
+        mergeable == null -> null
+        else -> mergeable == false
     }
 
     val hasGitHubAutoMerge: Boolean get() = autoMerge != null && autoMerge !is kotlinx.serialization.json.JsonNull

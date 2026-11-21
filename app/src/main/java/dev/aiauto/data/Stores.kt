@@ -92,6 +92,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("auto_merge", true)
         set(value) = prefs.edit().putBoolean("auto_merge", value).apply()
 
+    /** Send failing checks on a task's pull request back to Claude without asking. */
+    var autoFixChecks: Boolean
+        get() = prefs.getBoolean("auto_fix_checks", true)
+        set(value) = prefs.edit().putBoolean("auto_fix_checks", value).apply()
+
+    /** Have Claude resolve merge conflicts on a task's pull request without asking. */
+    var autoFixConflicts: Boolean
+        get() = prefs.getBoolean("auto_fix_conflicts", true)
+        set(value) = prefs.edit().putBoolean("auto_fix_conflicts", value).apply()
+
     /** What Claude has cost today, by the phone's local date. Resets at midnight. */
     @get:Synchronized
     val spentTodayUsd: Double
