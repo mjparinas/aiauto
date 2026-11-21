@@ -1,0 +1,7 @@
+<resources>
+    <color name="widget_bg">#F7F6F2EA</color>
+    <color name="widget_text">#2A2825</color>
+    <color name="widget_subtle">#6B655D</color>
+    <color name="widget_accent">#C96F4A</color>
+    <string name="widget_description">Running tasks and today\'s spend</string>
+</resources>
