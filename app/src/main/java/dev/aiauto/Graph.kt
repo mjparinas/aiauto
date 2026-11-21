@@ -13,6 +13,7 @@ import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Projects
 import dev.aiauto.core.TaskEngine
+import dev.aiauto.core.VoiceControls
 import dev.aiauto.data.FileTaskStore
 import dev.aiauto.data.RepoStore
 import dev.aiauto.data.Secrets
@@ -59,6 +60,15 @@ class Graph(context: Context) {
             TaskService.ensureRunning(context)
         },
         onProgress = { _, text -> notifier.onProgress(text) },
+    )
+
+    /** Status, stop and merge by voice. */
+    private val voiceControls = VoiceControls(
+        store = tasks,
+        repos = { repos.repos.value },
+        engine = engine,
+        github = { secrets.githubToken?.let { GitHub(it) } },
+        merge = ::mergePull,
     )
 
     /** The spoken conversation behind the car's mic button. */
@@ -114,6 +124,14 @@ class Graph(context: Context) {
                 repos.add(repo)
                 return "Added ${repo.fullName}."
             }
+
+            override fun status(repo: String, prNumber: Int?, taskId: String) = voiceControls.status(repo, prNumber, taskId)
+
+            override fun stopTask(taskId: String) = voiceControls.stop(taskId)
+
+            override fun previewMerge(repo: String, prNumber: Int?) = voiceControls.previewMerge(repo, prNumber)
+
+            override fun merge(repo: RepoRef, number: Int) = voiceControls.merge(repo, number)
         },
         canSpend = { settings.dailyLimitUsd?.let { settings.spentTodayUsd < it } ?: true },
         onSpend = { settings.addSpend(it) },

@@ -229,6 +229,9 @@ class TaskEngine(
         return finished.size
     }
 
+    /** One spoken sentence on where the task stands, for the voice assistant. */
+    fun statusOf(taskId: String): String = store.get(taskId)?.let(::statusLine) ?: "That task is gone."
+
     /** One spoken sentence on where the task stands. */
     private fun statusLine(task: Task): String {
         val number = task.prNumber
