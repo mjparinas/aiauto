@@ -71,6 +71,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
                     .setTitle("Clear $finished finished task${if (finished == 1) "" else "s"}")
                     .addText("Stopped tasks, and done ones with no open pull request")
                     .setOnClickListener {
+                        g.tasks.all().filter { it.isFinished && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }
                         val cleared = g.engine.clearFinished()
                         CarToast.makeText(carContext, "Cleared $cleared", CarToast.LENGTH_SHORT).show()
                     }

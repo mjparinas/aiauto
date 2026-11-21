@@ -448,6 +448,15 @@ class TaskEngine(
             } catch (e: Exception) {
                 append(taskId, Speaker.Status, "Couldn't open the pull request. ${Failures.describe(e)}")
             }
+        } else if (token != null && task.hasOpenPr) {
+            // A follow-up turn may have pushed new commits: restart the watch window and read the new head's checks,
+            // so a fix for failing checks gets watched and merged instead of staying stuck on the old result.
+            update(taskId) { it.copy(prOpenedMillis = clock()) }
+            try {
+                refreshPullRequest(taskId)
+            } catch (e: Exception) {
+                // The regular refresh tries again later.
+            }
         }
         val asked = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.endsWith("?") == true
         update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done) }

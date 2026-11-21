@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
                             screen = Screen.Projects
                         },
                         finishedCount = tasks.count { it.isFinished && !g.engine.isRunning(it.id) },
-                        onClearFinished = { tasks.filter { it.isFinished }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
+                        onClearFinished = { tasks.filter { it.isFinished && !g.engine.isRunning(it.id) }.forEach { g.notifier.clear(it.id) }; g.engine.clearFinished() },
                         spentToday = g.settings.spentTodayUsd,
                         dailyLimit = g.settings.dailyLimitUsd,
                     )

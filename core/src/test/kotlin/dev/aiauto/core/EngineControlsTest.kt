@@ -218,6 +218,27 @@ class EngineControlsTest {
         assertTrue(github.merges.isEmpty())
     }
 
+    @Test fun watchesAgainAfterAFollowUpPushesAFix() {
+        config.merge = true
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.checksResult = ChecksSummary(Checks.Failing, failing = listOf("build"), total = 1)
+        engine.refreshPullRequest(task.id)
+        now += 4 * 60 * 60 * 1000L
+        assertFalse(engine.isWatchingPullRequests())
+
+        // Claude pushes a fix in a follow-up turn; the new head's checks are running.
+        github.pr = github.pr.copy(head = PullRequest.Head("def"))
+        github.checksResult = ChecksSummary(Checks.Pending, total = 1)
+        engine.prompt(task.id, "fix the build")
+        assertEquals(Checks.Pending, store.get(task.id)!!.checks?.state)
+        assertTrue(engine.isWatchingPullRequests())
+
+        github.checksResult = ChecksSummary(Checks.Passing, total = 1)
+        engine.refreshPullRequest(task.id)
+        assertEquals(listOf(7), github.merges)
+    }
+
     @Test fun waitsForChecksToAppearBeforeMergingARepoWithoutCi() {
         config.merge = true
         github.checksResult = ChecksSummary(Checks.None)
