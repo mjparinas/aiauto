@@ -59,6 +59,11 @@ Requires JDK 17 and the Android SDK (API 35).
 In the Actions tab, open **Release**, click **Run workflow** and enter a version like `v0.2.0`. You can also push
 a tag like that. Either way, the workflow builds the APK and publishes a release with the APK attached.
 
+To release automatically, turn on auto-release: in the repo's Settings, open **Secrets and variables**, then
+**Actions**, then **Variables**, and add `AUTO_RELEASE` with the value `true`. After that, every pull request merged
+into `main` publishes the next patch version (for example `v0.4.4` becomes `v0.4.5`). Delete the variable or set
+it to anything else to turn it off.
+
 Releases are signed with the CI runner's temporary debug key. Android might refuse to install a new version over
 an old one; if it does, uninstall the old one first. A fixed signing key stored as a repo secret would solve this.
 
