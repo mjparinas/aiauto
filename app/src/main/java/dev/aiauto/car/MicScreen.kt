@@ -127,7 +127,8 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
             thinking?.cancel()
             voice.cancel()
             g.speaker.stop()
-            g.assistant.reset()
+            // reset() waits for an answer that's still on its way, so it must not run on the car's main thread.
+            g.scope.launch(Dispatchers.IO) { g.assistant.reset() }
             heard = null
             show(State.Idle, HELLO)
         }.build()

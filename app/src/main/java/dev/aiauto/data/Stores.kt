@@ -47,7 +47,19 @@ private class JsonListFile<T>(private val file: File, private val serializer: KS
 
 class FileTaskStore(context: Context) : TaskStore {
     private val list = JsonListFile(File(context.filesDir, "tasks.json"), Task.serializer())
+    /** Ids of tasks cleared here or on another device, so sync doesn't bring them back. */
+    private val removed = JsonListFile(File(context.filesDir, "removed_tasks.json"), kotlinx.serialization.serializer<String>())
     val tasks: StateFlow<List<Task>> = list.flow
+
+    /** Cleared task ids, oldest first. */
+    fun removedIds(): List<String> = removed.flow.value
+
+    /** Remembers ids cleared on another device, so this one keeps passing them on. */
+    @Synchronized
+    fun rememberRemoved(ids: List<String>) {
+        val merged = (removed.flow.value + ids).distinct().takeLast(dev.aiauto.core.SyncMerge.REMOVED_KEPT)
+        if (merged != removed.flow.value) removed.set(merged)
+    }
 
     override fun get(id: String): Task? = list.flow.value.firstOrNull { it.id == id }
     override fun all(): List<Task> = list.flow.value
@@ -59,7 +71,10 @@ class FileTaskStore(context: Context) : TaskStore {
     }
 
     @Synchronized
-    override fun remove(id: String) = list.set(list.flow.value.filter { it.id != id })
+    override fun remove(id: String) {
+        list.set(list.flow.value.filter { it.id != id })
+        rememberRemoved(listOf(id))
+    }
 }
 
 class RepoStore(context: Context) {
@@ -77,20 +92,29 @@ class RepoStore(context: Context) {
 /** Past car-chat exchanges, newest last, so the next drive can pick up where this one left off. */
 class FileChatMemory(context: Context) : dev.aiauto.core.ChatMemory {
     private val list = JsonListFile(File(context.filesDir, "chat_memory.json"), dev.aiauto.core.ChatExchange.serializer())
+    private val prefs = context.getSharedPreferences("chat_memory", Context.MODE_PRIVATE)
 
     override fun recent() = list.flow.value
+
+    /** When the memory was last cleared, here or on another device. Sync keeps older exchanges from coming back. */
+    val forgottenMillis: Long get() = prefs.getLong("forgotten", 0L)
 
     @Synchronized
     override fun remember(exchange: dev.aiauto.core.ChatExchange) =
         list.set((list.flow.value + exchange).takeLast(dev.aiauto.core.ChatMemory.KEEP))
 
     @Synchronized
-    override fun forget() = list.set(emptyList())
+    override fun forget() {
+        prefs.edit().putLong("forgotten", System.currentTimeMillis()).apply()
+        list.set(emptyList())
+    }
 
-    /** Replaces everything with [exchanges], for sync. */
+    /** Replaces everything with [exchanges], for sync, after a clear made on another device at [forgottenAt]. */
     @Synchronized
-    fun replaceAll(exchanges: List<dev.aiauto.core.ChatExchange>) {
-        if (exchanges != list.flow.value) list.set(exchanges)
+    fun replaceAll(exchanges: List<dev.aiauto.core.ChatExchange>, forgottenAt: Long) {
+        if (forgottenAt > forgottenMillis) prefs.edit().putLong("forgotten", forgottenAt).apply()
+        val kept = exchanges.filter { it.timeMillis > forgottenMillis }
+        if (kept != list.flow.value) list.set(kept)
     }
 }
 
