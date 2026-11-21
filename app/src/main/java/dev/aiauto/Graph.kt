@@ -31,7 +31,7 @@ class Graph(context: Context) {
     val settings = Settings(context)
     val tasks = FileTaskStore(context)
     val repos = RepoStore(context)
-    val speaker = Speaker(context)
+    val speaker = Speaker(context, settings)
     val notifier = Notifier(context, settings, speaker)
     // Anything that slips past the engine's own error handling is logged instead of crashing the app.
     val scope = CoroutineScope(SupervisorJob() + CoroutineExceptionHandler { _, e -> Log.e("AiAuto", "Background work failed", e) })
@@ -43,6 +43,7 @@ class Graph(context: Context) {
             override fun githubToken() = secrets.githubToken
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
+            override fun agentProfile() = settings.agentProfile
             override fun quietMode() = settings.quietMode
             override fun dailyLimitUsd() = settings.dailyLimitUsd
             override fun spentTodayUsd() = settings.spentTodayUsd
@@ -116,6 +117,7 @@ class Graph(context: Context) {
         },
         canSpend = { settings.dailyLimitUsd?.let { settings.spentTodayUsd < it } ?: true },
         onSpend = { settings.addSpend(it) },
+        profile = { settings.chatProfile },
     )
 
     /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */

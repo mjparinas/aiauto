@@ -39,6 +39,7 @@ class Assistant(
     private val actions: AssistantActions,
     private val canSpend: () -> Boolean = { true },
     private val onSpend: (Double) -> Unit = {},
+    private val profile: () -> ChatProfile = { ChatProfile() },
     private val clientFactory: (String) -> AnthropicClient = ::defaultClient,
 ) {
     private val history = mutableListOf<MessageParam>()
@@ -68,8 +69,9 @@ class Assistant(
     private fun converse(claude: AnthropicClient): String {
         val spoken = StringBuilder()
         repeat(MAX_TOOL_ROUNDS) {
-            val message = claude.messages().create(params())
-            onSpend(costUsd(message))
+            val chat = profile()
+            val message = claude.messages().create(params(chat))
+            onSpend(costUsd(message, chat.model))
             history += message.toParam()
             message.content().forEach { block -> block.text().ifPresent { spoken.appendSentence(it.text()) } }
             val stop = message.stopReason().orElse(null)
@@ -99,11 +101,11 @@ class Assistant(
         return ToolResultBlockParam.builder().toolUseId(call.id()).content(text).isError(error).build()
     }
 
-    private fun params(): MessageCreateParams = MessageCreateParams.builder()
-        .model(MODEL)
+    private fun params(chat: ChatProfile): MessageCreateParams = MessageCreateParams.builder()
+        .model(chat.model.id)
         .maxTokens(MAX_TOKENS)
-        // Low effort keeps replies quick, which matters more than depth while driving.
-        .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
+        // Low effort by default keeps replies quick, which matters more than depth while driving.
+        .outputConfig(OutputConfig.builder().effort(effort(chat.effort)).build())
         .system(SYSTEM + "\n\nCurrent state of the app:\n" + actions.context())
         .addTool(startTaskTool)
         .addTool(replyTool)
@@ -128,17 +130,12 @@ class Assistant(
     }
 
     companion object {
-        const val MODEL = "claude-opus-5-5"
         private const val MAX_TOKENS = 4000L
         private const val MAX_TOOL_ROUNDS = 4
         private const val MAX_HISTORY = 30
         private const val START_TASK = "start_coding_task"
         private const val REPLY_TO_TASK = "reply_to_task"
         private const val ADD_REPO = "add_repo"
-
-        // List price for claude-opus-5-5, US dollars per million tokens.
-        private const val INPUT_PER_MTOK = 4.0
-        private const val OUTPUT_PER_MTOK = 20.0
 
         private val SYSTEM = """
             You are Claude, talking with the driver through their car's speakers. Everything you write is read
@@ -205,10 +202,18 @@ class Assistant(
             .timeout(Duration.ofSeconds(60))
             .build()
 
-        fun costUsd(message: Message): Double {
+        fun costUsd(message: Message, model: ModelChoice = ModelChoice.Opus): Double {
             val usage = message.usage()
             val input = usage.inputTokens() + usage.cacheCreationInputTokens().orElse(0L) + usage.cacheReadInputTokens().orElse(0L)
-            return (input * INPUT_PER_MTOK + usage.outputTokens() * OUTPUT_PER_MTOK) / 1_000_000.0
+            return model.costUsd(input, usage.outputTokens())
+        }
+
+        private fun effort(effort: EffortChoice): OutputConfig.Effort = when (effort) {
+            EffortChoice.Low -> OutputConfig.Effort.LOW
+            EffortChoice.Medium -> OutputConfig.Effort.MEDIUM
+            EffortChoice.High -> OutputConfig.Effort.HIGH
+            EffortChoice.XHigh -> OutputConfig.Effort.XHIGH
+            EffortChoice.Max -> OutputConfig.Effort.MAX
         }
 
         private fun StringBuilder.appendSentence(text: String) {

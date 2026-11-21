@@ -103,6 +103,10 @@ data class SettingsState(
     val version: String,
     val themeMode: ThemeMode,
     val accent: Accent,
+    val agentProfile: dev.aiauto.core.AgentProfile = dev.aiauto.core.AgentProfile(),
+    val chatProfile: dev.aiauto.core.ChatProfile = dev.aiauto.core.ChatProfile(),
+    val speechRate: Float = 1f,
+    val voiceName: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -131,6 +135,12 @@ fun SettingsScreen(
     onAccent: (Accent) -> Unit,
     onDailyLimit: (Double?) -> Unit,
     onCheckUpdate: () -> Unit,
+    onAgentProfile: (dev.aiauto.core.AgentProfile) -> Unit = {},
+    onChatProfile: (dev.aiauto.core.ChatProfile) -> Unit = {},
+    voices: () -> List<dev.aiauto.notify.VoiceOption> = { emptyList() },
+    onSpeechRate: (Float) -> Unit = {},
+    onVoice: (String?) -> Unit = {},
+    onPreviewVoice: () -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -199,7 +209,10 @@ fun SettingsScreen(
                     "Only tells you the result of each request, not every step along the way.",
                     state.quietMode, onQuietMode,
                 )
+                VoiceRows(state.speechRate, state.voiceName, voices, onSpeechRate, onVoice, onPreviewVoice)
             }
+
+            ClaudeSettingsSection(state.agentProfile, state.chatProfile, onAgentProfile, onChatProfile)
 
             SectionHeader("Pull requests")
             SettingsCard {
@@ -309,7 +322,7 @@ private enum class SettingsDialog { AnthropicKey, GithubToken, PickRepos, AddRep
 
 /** Small capitals over each card, lined up with the text on the card below it. A heading for screen readers. */
 @Composable
-private fun SectionHeader(text: String) {
+internal fun SectionHeader(text: String) {
     Text(
         text.uppercase(),
         style = MaterialTheme.typography.labelLarge.merge(TextStyle(fontWeight = FontWeight.Medium, letterSpacing = 1.2.sp)),
@@ -326,7 +339,7 @@ private fun SectionHeader(text: String) {
 
 /** One section's rows together on a rounded card; each row's press ripple stays inside the card's corners. */
 @Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier
             .padding(horizontal = 16.dp)
@@ -340,7 +353,7 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 
 /** A line of small print under a card. */
 @Composable
-private fun Note(text: String) {
+internal fun Note(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,
@@ -350,7 +363,7 @@ private fun Note(text: String) {
 }
 
 @Composable
-private fun SettingRow(
+internal fun SettingRow(
     icon: ImageVector,
     hue: BadgeHue,
     title: String,
@@ -373,7 +386,7 @@ private fun SettingRow(
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     icon: ImageVector,
     hue: BadgeHue,
     title: String,
@@ -398,7 +411,7 @@ private fun SwitchRow(
 }
 
 @Composable
-private fun RowText(title: String, summary: String?, modifier: Modifier = Modifier) {
+internal fun RowText(title: String, summary: String?, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
         if (!summary.isNullOrBlank()) {
@@ -446,7 +459,7 @@ private fun AccentRow(selected: Accent, onPick: (Accent) -> Unit) {
  * The colours of a row's round icon badge. Each has a deep shade for the light theme and a soft one for the dark theme,
  * so the icon reads well on its own tinted circle either way. [Accent] follows the chosen accent colour.
  */
-private enum class BadgeHue(val light: Long, val dark: Long) {
+internal enum class BadgeHue(val light: Long, val dark: Long) {
     Blue(0xFF14509A, 0xFF8AB4F8),
     Violet(0xFF5235C8, 0xFFB9A6FF),
     Teal(0xFF005D52, 0xFF4DD0C2),
@@ -457,7 +470,7 @@ private enum class BadgeHue(val light: Long, val dark: Long) {
 }
 
 @Composable
-private fun IconBadge(icon: ImageVector, hue: BadgeHue) {
+internal fun IconBadge(icon: ImageVector, hue: BadgeHue) {
     val colour = when {
         hue == BadgeHue.Accent -> MaterialTheme.colorScheme.primary
         MaterialTheme.colorScheme.background.luminance() < 0.5f -> Color(hue.dark)
@@ -473,7 +486,7 @@ private fun IconBadge(icon: ImageVector, hue: BadgeHue) {
 
 /** A dialog with one text field. Saving with a blank field is allowed only when [allowBlank] (it means "clear"). */
 @Composable
-private fun TextDialog(
+internal fun TextDialog(
     title: String,
     label: String,
     help: String? = null,
@@ -591,7 +604,7 @@ private fun PickReposDialog(
 
 /** A setting with a fixed set of choices, picked from a list of radio buttons. */
 @Composable
-private fun <T> ChoiceDialog(
+internal fun <T> ChoiceDialog(
     title: String,
     options: List<T>,
     selected: T,
@@ -604,7 +617,8 @@ private fun <T> ChoiceDialog(
         shape = RoundedCornerShape(28.dp),
         title = { Text(title) },
         text = {
-            Column {
+            // Scrolls, so a long list such as the phone's voices still fits on screen.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 options.forEach { option ->
                     Row(
                         Modifier

@@ -15,6 +15,9 @@ interface EngineConfig {
     fun agentSetup(): AgentSetup?
     fun saveAgentSetup(setup: AgentSetup)
 
+    /** The model, effort, web search and standing rules new tasks should use. */
+    fun agentProfile(): AgentProfile = AgentProfile()
+
     /** Quiet mode: only announce each turn's result, failures and pull requests, not every step. */
     fun quietMode(): Boolean = false
 

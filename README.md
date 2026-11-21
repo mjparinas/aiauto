@@ -81,7 +81,7 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
    installs from that source. Every push also builds an APK, which you can find under the **Build** run's
    Artifacts in the Actions tab.
 2. **Claude API key.** Create one at [platform.claude.com](https://platform.claude.com). Usage is billed to that
-   account. The model is Claude Opus 5.5, and each task is a Managed Agents session.
+   account. Tasks use Claude Opus 5.5 by default, and each task is a Managed Agents session.
 3. **GitHub token.** Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for
    the repos you want to use. Set **Contents** and **Pull requests** to read and write, and **Checks** and
    **Commit statuses** to read. To let GitHub merge on its own, turn on **Allow auto-merge** in the repo's settings.
@@ -99,6 +99,18 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
 6. **Background work.** The first time you open the app it asks to ignore battery optimization. Say yes: otherwise
    Android (Samsung phones especially) may stop Claude's tasks soon after you unplug from the car. You can change it
    later under Settings > Apps > Cruise Control > Battery > Unrestricted.
+
+## Claude and voice settings
+
+- **Model and effort.** Settings > Claude picks the model (Opus 5.5, Sonnet 5.5 or Haiku 5.5) and effort for coding
+  tasks, and separately for the spoken car chat, which defaults to low effort so answers come back quickly.
+- **Allow web search.** Lets Claude search the web and read pages while it works. Its workspace then runs with open
+  internet access instead of only package registries.
+- **Standing rules.** Tick common rules, like always adding tests or leaving CI files alone, and add your own, one
+  per line. They're added to Claude's instructions for every task.
+- Changing any of these makes a new agent for the next task. Tasks already running keep the agent they started with.
+- **Speaking speed and voice** are under In the car. The voice list shows the phone's text-to-speech voices for its
+  language, and a sample plays when you pick one.
 
 ## Building locally
 

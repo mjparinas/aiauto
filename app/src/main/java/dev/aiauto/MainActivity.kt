@@ -219,6 +219,12 @@ class MainActivity : ComponentActivity() {
                                 message = it?.let { v -> "Daily limit set to ${dev.aiauto.core.SpokenStatus.money(v)}." } ?: "No daily limit.",
                             )
                         },
+                        onAgentProfile = { g.settings.agentProfile = it; settings = settings.copy(agentProfile = it) },
+                        onChatProfile = { g.settings.chatProfile = it; settings = settings.copy(chatProfile = it) },
+                        voices = { g.speaker.voices() },
+                        onSpeechRate = { g.settings.speechRate = it; settings = settings.copy(speechRate = it) },
+                        onVoice = { g.settings.voiceName = it; settings = settings.copy(voiceName = it) },
+                        onPreviewVoice = { g.speaker.stop(); g.speaker.speak("This is how I'll sound in the car.") },
                         onCheckUpdate = {
                             settings = settings.copy(busy = true, message = "Checking for updates…")
                             android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
@@ -261,6 +267,10 @@ class MainActivity : ComponentActivity() {
         version = (application as AiAutoApp).updater.currentVersion,
         themeMode = enumOrDefault(graph.settings.themeMode, ThemeMode.System),
         accent = enumOrDefault(graph.settings.accent, Accent.Clay),
+        agentProfile = graph.settings.agentProfile,
+        chatProfile = graph.settings.chatProfile,
+        speechRate = graph.settings.speechRate,
+        voiceName = graph.settings.voiceName,
     )
 
     private inline fun <reified E : Enum<E>> enumOrDefault(name: String, default: E): E =

@@ -17,7 +17,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * car speakers. Only speaks while the phone is connected to a car. Music is ducked while it talks,
  * and anything said before the speech engine is ready is queued instead of dropped.
  */
-class Speaker(context: Context) {
+/** A text-to-speech voice you can pick in Settings. */
+data class VoiceOption(val name: String, val label: String)
+
+class Speaker(context: Context, private val settings: dev.aiauto.data.Settings) {
     @Volatile var inCar = false
         private set
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -74,7 +77,35 @@ class Speaker(context: Context) {
         audio.abandonAudioFocusRequest(focus)
     }
 
+    /**
+     * Voices for the phone's language that the engine has installed, best first. Empty until the engine is ready.
+     * Voices that need a network connection are marked, since they can drop out on a bad signal.
+     */
+    @Synchronized
+    fun voices(): List<VoiceOption> {
+        if (!ready) return emptyList()
+        val language = Locale.getDefault().language
+        val all = runCatching { tts.voices.orEmpty() }.getOrDefault(emptySet())
+            .filter { it.locale.language == language && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .sortedWith(compareBy({ it.isNetworkConnectionRequired }, { it.locale.displayName }, { it.name }))
+        val perLocale = HashMap<String, Int>()
+        return all.map { voice ->
+            val place = voice.locale.displayName
+            val n = perLocale.merge(place, 1, Int::plus)!!
+            VoiceOption(voice.name, "$place, voice $n" + if (voice.isNetworkConnectionRequired) " (needs internet)" else "")
+        }
+    }
+
+    /** Applies the speed and voice from Settings before each utterance, so changes take effect right away. */
+    private fun applyVoice() {
+        runCatching { tts.setSpeechRate(settings.speechRate) }
+        val wanted = settings.voiceName
+        val voice = wanted?.let { name -> runCatching { tts.voices?.firstOrNull { it.name == name } }.getOrNull() }
+        runCatching { if (voice != null) tts.voice = voice else if (wanted == null) tts.voice = tts.defaultVoice }
+    }
+
     private fun say(text: String, onDone: (() -> Unit)?) {
+        applyVoice()
         if (queued.getAndIncrement() == 0) audio.requestAudioFocus(focus)
         val id = "u" + utteranceIds.incrementAndGet()
         onDone?.let { callbacks[id] = it }

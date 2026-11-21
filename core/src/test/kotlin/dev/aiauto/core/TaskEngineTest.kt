@@ -25,13 +25,15 @@ class TaskEngineTest {
         override fun remove(id: String) { map.remove(id) }
     }
 
-    private class Config(var setup: AgentSetup? = AgentSetup("agent", 1, "env")) : EngineConfig {
+    private class Config(var setup: AgentSetup? = AgentSetup("agent", 1, "env", AgentProfile())) : EngineConfig {
         override fun anthropicKey() = "key"
         override fun githubToken() = "token"
         override fun agentSetup() = setup
         override fun saveAgentSetup(setup: AgentSetup) { this.setup = setup }
         var quiet = false
         override fun quietMode() = quiet
+        var profile = AgentProfile()
+        override fun agentProfile() = profile
     }
 
     /** Scripted Claude: each list entry is what one call does, then it behaves normally. */
@@ -44,7 +46,12 @@ class TaskEngineTest {
         var sessionsCreated = 0
         var setupsCreated = 0
 
-        override fun createSetup(): AgentSetup { setupsCreated++; return AgentSetup("agent2", 1, "env2") }
+        var lastExisting: AgentSetup? = null
+        override fun createSetup(profile: AgentProfile, existing: AgentSetup?): AgentSetup {
+            setupsCreated++
+            lastExisting = existing
+            return AgentSetup("agent2", 1, existing?.environmentId ?: "env2", profile)
+        }
         override fun createSession(setup: AgentSetup, task: Task, githubToken: String): String {
             sessionFailures.removeFirstOrNull()?.let { throw it }
             sessionsCreated++
@@ -114,6 +121,18 @@ class TaskEngineTest {
         assertTrue(done.messages.any { it.text == "Looking at the settings screen." })
         assertFalse(spoken.any { it == "Looking at the settings screen." || it.startsWith("Claude is starting") })
         assertEquals("Added the toggle and tests pass.", spoken.first())
+    }
+
+    @Test fun makesANewAgentWhenSettingsChangeAndKeepsTheEnvironment() {
+        engine().start(repo, "first")
+        assertEquals(0, claude.setupsCreated)
+        config.profile = AgentProfile(model = ModelChoice.Sonnet.id, rules = listOf(StandingRule.AddTests.name))
+        engine().start(repo, "second")
+        assertEquals(1, claude.setupsCreated)
+        assertEquals(config.profile, config.setup?.profile)
+        assertEquals("env", claude.lastExisting?.environmentId)
+        engine().start(repo, "third")
+        assertEquals(1, claude.setupsCreated)
     }
 
     @Test fun recreatesAMissingAgentSetupOnce() {

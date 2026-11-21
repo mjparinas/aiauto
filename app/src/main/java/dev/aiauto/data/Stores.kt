@@ -1,7 +1,11 @@
 package dev.aiauto.data
 
 import android.content.Context
+import dev.aiauto.core.AgentProfile
 import dev.aiauto.core.AgentSetup
+import dev.aiauto.core.ChatProfile
+import dev.aiauto.core.EffortChoice
+import dev.aiauto.core.ModelChoice
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Task
 import dev.aiauto.core.TaskStore
@@ -142,6 +146,30 @@ class Settings(context: Context) {
         tasks.all().filter { it.costUsd > 0 }.forEach { tasks.put(it.copy(costUsd = it.costUsd / 100)) }
         prefs.edit().putInt("cost_units", 2).apply()
     }
+
+    /** Model, effort, web search and standing rules for coding tasks. */
+    var agentProfile: AgentProfile
+        get() = prefs.getString("agent_profile", null)
+            ?.let { runCatching { json.decodeFromString(AgentProfile.serializer(), it) }.getOrNull() } ?: AgentProfile()
+        set(value) = prefs.edit().putString("agent_profile", json.encodeToString(AgentProfile.serializer(), value)).apply()
+
+    /** Model and effort for the spoken chat in the car. */
+    var chatProfile: ChatProfile
+        get() = ChatProfile(
+            model = ModelChoice.of(prefs.getString("chat_model", null)),
+            effort = EffortChoice.of(prefs.getString("chat_effort", null), EffortChoice.Low),
+        )
+        set(value) = prefs.edit().putString("chat_model", value.model.id).putString("chat_effort", value.effort.name).apply()
+
+    /** How fast updates are read aloud; 1 is the engine's normal speed. */
+    var speechRate: Float
+        get() = prefs.getFloat("speech_rate", 1f)
+        set(value) = prefs.edit().putFloat("speech_rate", value).apply()
+
+    /** The text-to-speech voice's name, or null for the phone's default voice. */
+    var voiceName: String?
+        get() = prefs.getString("voice_name", null)
+        set(value) = prefs.edit().apply { if (value == null) remove("voice_name") else putString("voice_name", value) }.apply()
 
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
