@@ -28,6 +28,8 @@ class SyncManager(
     private val repos: RepoStore,
     private val chat: FileChatMemory,
     private val scope: CoroutineScope,
+    /** Clears a task that was cleared on another device: stops it if it runs here, and removes its notification. */
+    private val removeTask: (String) -> Unit = tasks::remove,
 ) {
     private val lock = Mutex()
 
@@ -81,10 +83,15 @@ class SyncManager(
             settings = settings.exportSynced(),
             settingsChangedMillis = settings.settingsChangedMillis,
             chat = if (settings.rememberChats) chat.recent() else emptyList(),
+            removedTasks = tasks.removedIds(),
+            chatForgottenMillis = chat.forgottenMillis,
         )
         val (gistId, merged) = GistSync(GitHub(token)).sync(settings.syncGistId, local)
         settings.syncGistId = gistId
 
+        // Tasks cleared on another device go here too, instead of coming back on the next round.
+        tasks.rememberRemoved(merged.removedTasks)
+        merged.removedTasks.filter { tasks.get(it) != null }.forEach(removeTask)
         merged.tasks.forEach { incoming ->
             val current = tasks.get(incoming.id)
             // Skip a task that changed here while the round was running; the next round sends it.
@@ -92,7 +99,7 @@ class SyncManager(
         }
         merged.repos.filter { repos.find(it.fullName) == null }.forEach { repos.add(it) }
         if (merged.settingsChangedMillis > local.settingsChangedMillis) settings.importSynced(merged.settings, merged.settingsChangedMillis)
-        if (settings.rememberChats) chat.replaceAll(merged.chat)
+        if (settings.rememberChats) chat.replaceAll(merged.chat, merged.chatForgottenMillis)
     }
 
     private fun describe(e: Exception): String = when {

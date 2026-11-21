@@ -20,6 +20,26 @@ class SyncTest {
         assertEquals(setOf("a", "b"), merged.tasks.map { it.id }.toSet())
     }
 
+    @Test fun aTaskClearedOnEitherSideStaysCleared() {
+        val local = SyncSnapshot(tasks = listOf(task("b", 5)), removedTasks = listOf("a"))
+        val remote = SyncSnapshot(tasks = listOf(task("a", 20), task("b", 5)))
+        val merged = SyncMerge.merge(local, remote)
+        assertEquals(listOf("b"), merged.tasks.map { it.id })
+        assertEquals(listOf("a"), merged.removedTasks)
+        // The other way round too: the gist remembers a clear made on another device.
+        assertEquals(listOf("b"), SyncMerge.merge(remote.copy(removedTasks = emptyList()), local).tasks.map { it.id })
+    }
+
+    @Test fun forgottenCarChatStaysForgotten() {
+        val old = ChatExchange("hi", "hello", 10)
+        val new = ChatExchange("again", "hey", 30)
+        val local = SyncSnapshot(chat = emptyList(), chatForgottenMillis = 20)
+        val remote = SyncSnapshot(chat = listOf(old, new))
+        val merged = SyncMerge.merge(local, remote)
+        assertEquals(listOf(new), merged.chat)
+        assertEquals(20, merged.chatForgottenMillis)
+    }
+
     @Test fun keepsOwnUnsentPrompt() {
         val local = SyncSnapshot(tasks = listOf(task("a", 10).copy(pendingPrompt = "go")))
         val remote = SyncSnapshot(tasks = listOf(task("a", 20)))
