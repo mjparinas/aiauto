@@ -31,6 +31,12 @@ class CoreTest {
         assertEquals("Editing files", SpokenStatus.forToolUse("edit", null))
     }
 
+    @Test fun putsTasksThatNeedYouFirst() {
+        fun task(id: String, status: TaskStatus) = Task(id, RepoRef("a", "b"), id, id, status = status, createdMillis = 0, updatedMillis = 0)
+        val tasks = listOf(task("1", TaskStatus.Working), task("2", TaskStatus.NeedsInput), task("3", TaskStatus.Done), task("4", TaskStatus.NeedsInput))
+        assertEquals(listOf("2", "4", "1", "3"), tasks.needsYouFirst().map { it.id })
+    }
+
     @Test fun makesTitlesAndBranches() {
         assertEquals("Add a dark mode toggle to settings", TaskEngine.titleFrom("add a dark mode toggle to settings"))
         assertEquals("add-a-dark-mode-toggle", TaskEngine.slug("Add a dark-mode toggle, to settings!"))

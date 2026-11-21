@@ -105,6 +105,9 @@ data class Task(
     val lastMessage: TaskMessage? get() = messages.lastOrNull()
 }
 
+/** Tasks waiting on the user's reply come first, so they're never pushed off a short list. Otherwise keeps the order. */
+fun List<Task>.needsYouFirst(): List<Task> = sortedBy { it.status != TaskStatus.NeedsInput }
+
 /** IDs of the agent and environment created once per API key. */
 @Serializable
 data class AgentSetup(

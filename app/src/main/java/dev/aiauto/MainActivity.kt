@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.NewTask -> NewTaskScreen(
                         repos = repos,
+                        lastUsed = tasks.maxByOrNull { it.createdMillis }?.repo,
                         onBack = { screen = Screen.Home },
                         onStart = { repo, text ->
                             val task = g.engine.start(repo, text)
@@ -139,7 +140,15 @@ class MainActivity : ComponentActivity() {
                                 screen = Screen.Home
                             },
                             onUnarchive = { g.engine.unarchive(task.id) },
-                            onMerge = { scope.launch(Dispatchers.IO) { runCatching { g.engine.mergeNow(task.id) } } },
+                            onMerge = {
+                                android.widget.Toast.makeText(this, "Merging…", android.widget.Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching { g.engine.mergeNow(task.id) }.getOrElse { "Couldn't merge. ${Failures.describe(it)}" }
+                                    }
+                                    android.widget.Toast.makeText(this@MainActivity, result, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            },
                             onRetry = {
                                 g.engine.retry(task.id)
                                 TaskService.ensureRunning(this)

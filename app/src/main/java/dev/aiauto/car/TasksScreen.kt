@@ -19,6 +19,7 @@ import dev.aiauto.R
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
 import dev.aiauto.core.TaskStatus
+import dev.aiauto.core.needsYouFirst
 import dev.aiauto.graph
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -39,7 +40,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
     override fun onGetTemplate(): Template {
         val items = ItemList.Builder()
         // Archived tasks live on the phone's Archived tab, not in the car.
-        val all = g.tasks.tasks.value.filter { !it.archived }
+        val all = g.tasks.tasks.value.filter { !it.archived }.needsYouFirst()
         val finished = all.count { it.isFinished && !g.engine.isRunning(it.id) }
         val canTalk = g.isConfigured && g.repos.repos.value.isNotEmpty()
         // Car lists hold about six rows; keep one for "Talk to Claude" and one for "Clear finished" when shown.
