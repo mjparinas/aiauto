@@ -28,7 +28,7 @@ class TasksScreen(carContext: CarContext) : Screen(carContext) {
 
     override fun onGetTemplate(): Template {
         val items = ItemList.Builder()
-        val tasks = g.tasks.tasks.value.take(MAX_ROWS)
+        val tasks = g.tasks.tasks.value.filterNot { it.archived }.take(MAX_ROWS)
         if (tasks.isEmpty()) {
             items.setNoItemsMessage(if (g.isConfigured) "No tasks yet. Tap New task to start one." else "Finish setup on your phone first.")
         }

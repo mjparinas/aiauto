@@ -50,6 +50,7 @@ data class Task(
     val prUrl: String? = null,
     val prNumber: Int? = null,
     val messages: List<TaskMessage> = emptyList(),
+    val archived: Boolean = false,
     val createdMillis: Long,
     val updatedMillis: Long,
 ) {

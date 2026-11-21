@@ -1,8 +1,10 @@
 package dev.aiauto.ui
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,10 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -24,15 +28,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.aiauto.core.Task
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,11 +54,17 @@ fun HomeScreen(
     tasks: List<Task>,
     hasRepos: Boolean,
     onOpen: (Task) -> Unit,
+    onArchive: (Task) -> Unit,
+    onUnarchive: (Task) -> Unit,
     onNew: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    val visible = tasks.filterNot { it.archived }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("Tasks", style = MaterialTheme.typography.headlineMedium) },
@@ -62,7 +82,7 @@ fun HomeScreen(
             )
         },
     ) { padding ->
-        if (tasks.isEmpty()) {
+        if (visible.isEmpty()) {
             EmptyState(Modifier.padding(padding), hasRepos)
         } else {
             LazyColumn(
@@ -70,10 +90,54 @@ fun HomeScreen(
                 contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(tasks, key = { it.id }) { task -> TaskCard(task) { onOpen(task) } }
+                items(visible, key = { it.id }) { task ->
+                    SwipeToArchive(
+                        onArchive = {
+                            onArchive(task)
+                            scope.launch {
+                                snackbar.currentSnackbarData?.dismiss()
+                                val result = snackbar.showSnackbar("Task archived", actionLabel = "Undo", withDismissAction = true)
+                                if (result == SnackbarResult.ActionPerformed) onUnarchive(task)
+                            }
+                        },
+                        modifier = Modifier.animateItem(),
+                    ) { TaskCard(task) { onOpen(task) } }
+                }
             }
         }
     }
+}
+
+/** Swiping a card away in either direction archives it. */
+@Composable
+private fun SwipeToArchive(onArchive: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = {
+            if (it != SwipeToDismissBoxValue.Settled) onArchive()
+            it != SwipeToDismissBoxValue.Settled
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        modifier = modifier,
+        backgroundContent = {
+            val alignment = if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) Alignment.CenterEnd else Alignment.CenterStart
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Archive, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Archive", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+        },
+    ) { content() }
 }
 
 @Composable
