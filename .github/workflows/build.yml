@@ -35,7 +35,7 @@ jobs:
           name: cruise-control-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           compression-level: 0
-      # Android Lint runs last so a lint error doesn't hide the test results or the APK. Errors fail the job.
+      # Android Lint runs last and only reports for now (see the lint block in app/build.gradle.kts).
       - name: Android Lint
         run: ./gradlew :app:lintDebug --stacktrace
       - name: Upload lint report
