@@ -44,6 +44,7 @@ import dev.aiauto.core.Checks
 import dev.aiauto.core.PrState
 import dev.aiauto.core.SpokenStatus
 import dev.aiauto.core.Task
+import dev.aiauto.core.needsYouFirst
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +63,7 @@ fun HomeScreen(
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val showArchived = tab == 1
     val (archived, active) = tasks.partition { it.archived }
-    val shown = if (showArchived) archived else active
+    val shown = if (showArchived) archived else active.needsYouFirst()
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {

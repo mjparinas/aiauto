@@ -32,8 +32,8 @@ import dev.aiauto.core.RepoRef
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewTaskScreen(repos: List<RepoRef>, onBack: () -> Unit, onStart: (RepoRef, String) -> Unit) {
-    var selected by remember { mutableStateOf(repos.firstOrNull()) }
+fun NewTaskScreen(repos: List<RepoRef>, lastUsed: RepoRef?, onBack: () -> Unit, onStart: (RepoRef, String) -> Unit) {
+    var selected by remember { mutableStateOf(lastUsed?.takeIf { it in repos } ?: repos.firstOrNull()) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
