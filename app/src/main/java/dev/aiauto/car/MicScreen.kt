@@ -121,6 +121,6 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
 
     private companion object {
         const val HELLO = "Tap Talk and ask Claude anything."
-        const val SETUP = "Open AIAuto on your phone and add your API key first."
+        const val SETUP = "Open Cruise Control on your phone and add your API key first."
     }
 }

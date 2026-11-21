@@ -79,7 +79,7 @@ class TaskDetailScreen(carContext: CarContext, private val taskId: String) : Scr
                     title = "Reply to Claude",
                     fallback = {
                         g.notifier.post(task)
-                        CarToast.makeText(carContext, "Open the AIAuto message and reply by voice", CarToast.LENGTH_LONG).show()
+                        CarToast.makeText(carContext, "Open the Cruise Control message and reply by voice", CarToast.LENGTH_LONG).show()
                     },
                 ) { text ->
                     g.engine.prompt(taskId, text)

@@ -24,7 +24,7 @@ fun UpdateDialog(updater: Updater) {
         is Updater.State.Available -> AlertDialog(
             onDismissRequest = updater::later,
             title = { Text("Update available") },
-            text = { Text("AIAuto ${s.update.version} is ready. You have ${updater.currentVersion}.") },
+            text = { Text("Cruise Control ${s.update.version} is ready. You have ${updater.currentVersion}.") },
             confirmButton = { TextButton(onClick = { updater.install(s.update) }) { Text("Install") } },
             dismissButton = { TextButton(onClick = updater::later) { Text("Later") } },
         )

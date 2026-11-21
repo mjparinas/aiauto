@@ -51,7 +51,7 @@ class VoiceInput(private val carContext: CarContext) {
                     if (Manifest.permission.RECORD_AUDIO in granted) start(onText, onError)
                     else onError("Allow microphone access to talk to Claude.")
                 }
-            }.onFailure { onError("Open AIAuto on your phone once to allow the microphone.") }
+            }.onFailure { onError("Open Cruise Control on your phone once to allow the microphone.") }
         }
     }
 
