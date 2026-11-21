@@ -69,6 +69,10 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_aloud", true)
         set(value) = prefs.edit().putBoolean("read_aloud", value).apply()
 
+    var quietMode: Boolean
+        get() = prefs.getBoolean("quiet_mode", false)
+        set(value) = prefs.edit().putBoolean("quiet_mode", value).apply()
+
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
         set(value) = prefs.edit().apply {

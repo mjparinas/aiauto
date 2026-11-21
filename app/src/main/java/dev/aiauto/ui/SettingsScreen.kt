@@ -44,6 +44,7 @@ data class SettingsState(
     val hasGithubToken: Boolean,
     val repos: List<RepoRef>,
     val readAloud: Boolean,
+    val quietMode: Boolean,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -57,6 +58,7 @@ fun SettingsScreen(
     onAddRepo: (String) -> Unit,
     onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
+    onQuietMode: (Boolean) -> Unit,
 ) {
     var anthropic by remember { mutableStateOf("") }
     var github by remember { mutableStateOf("") }
@@ -131,6 +133,17 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.readAloud, onCheckedChange = onReadAloud)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Quiet mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Only tells you the result of each request, not every step along the way.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.quietMode, onCheckedChange = onQuietMode)
             }
 
             state.message?.let {
