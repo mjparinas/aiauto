@@ -2,6 +2,7 @@ package dev.aiauto.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -33,5 +34,13 @@ class CoreTest {
         assertEquals("Add a dark mode toggle to settings", TaskEngine.titleFrom("add a dark mode toggle to settings"))
         assertEquals("add-a-dark-mode-toggle", TaskEngine.slug("Add a dark-mode toggle, to settings!"))
         assertEquals("task", TaskEngine.slug("!!!"))
+    }
+
+    @Test fun comparesVersions() {
+        assertTrue(Updates.isNewer("v0.2.0", "0.1.0"))
+        assertTrue(Updates.isNewer("v1.0", "0.9.9"))
+        assertTrue(Updates.isNewer("v0.1.10", "0.1.9"))
+        assertFalse(Updates.isNewer("v0.1.0", "0.1.0"))
+        assertFalse(Updates.isNewer("v0.1.0", "0.2.0"))
     }
 }

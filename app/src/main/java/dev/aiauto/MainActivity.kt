@@ -2,6 +2,7 @@ package dev.aiauto
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
+import dev.aiauto.core.Updates
 import dev.aiauto.ui.AiAutoTheme
 import dev.aiauto.ui.HomeScreen
 import dev.aiauto.ui.NewTaskScreen
@@ -81,7 +83,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Screen.Settings -> SettingsScreen(
-                        state = settingsState(repos).copy(busy = settings.busy, message = settings.message),
+                        state = settingsState(repos).copy(busy = settings.busy, message = settings.message, updateUrl = settings.updateUrl),
                         onBack = { screen = Screen.Home },
                         onSaveKeys = { anthropic, github ->
                             if (anthropic.isNotBlank()) {
@@ -110,6 +112,23 @@ class MainActivity : ComponentActivity() {
                         },
                         onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
+                        onCheckUpdate = {
+                            settings = settings.copy(busy = true, updateUrl = null, message = "Checking for updates…")
+                            scope.launch {
+                                val result = withContext(Dispatchers.IO) { runCatching { Updates.latest() } }
+                                settings = result.fold(
+                                    { release ->
+                                        if (Updates.isNewer(release.tag, appVersion)) {
+                                            settings.copy(busy = false, updateUrl = release.htmlUrl, message = "${release.tag} is available.")
+                                        } else {
+                                            settings.copy(busy = false, message = "You're on the latest version.")
+                                        }
+                                    },
+                                    { settings.copy(busy = false, message = it.message ?: "Couldn't check for updates.") },
+                                )
+                            }
+                        },
+                        onOpenUpdate = { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) },
                     )
                 }
             }
@@ -126,7 +145,11 @@ class MainActivity : ComponentActivity() {
         hasGithubToken = graph.secrets.githubToken != null,
         repos = repos,
         readAloud = graph.settings.readAloudInCar,
+        version = appVersion,
     )
+
+    private val appVersion: String
+        get() = packageManager.getPackageInfo(packageName, 0).versionName ?: "0"
 
     private fun Intent.taskTarget(): Screen? = getStringExtra(EXTRA_TASK)?.let { Screen.Detail(it) }
 

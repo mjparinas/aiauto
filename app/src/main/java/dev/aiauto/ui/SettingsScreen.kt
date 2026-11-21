@@ -44,6 +44,8 @@ data class SettingsState(
     val hasGithubToken: Boolean,
     val repos: List<RepoRef>,
     val readAloud: Boolean,
+    val version: String,
+    val updateUrl: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -57,6 +59,8 @@ fun SettingsScreen(
     onAddRepo: (String) -> Unit,
     onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
+    onCheckUpdate: () -> Unit,
+    onOpenUpdate: (String) -> Unit,
 ) {
     var anthropic by remember { mutableStateOf("") }
     var github by remember { mutableStateOf("") }
@@ -131,6 +135,14 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.readAloud, onCheckedChange = onReadAloud)
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("About")
+            Text("Version ${state.version}", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onCheckUpdate, enabled = !state.busy) { Text("Check for updates") }
+                state.updateUrl?.let { url -> Button(onClick = { onOpenUpdate(url) }) { Text("Download") } }
             }
 
             state.message?.let {

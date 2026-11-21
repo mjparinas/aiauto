@@ -14,7 +14,8 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        // The release workflow passes -PappVersion from the tag so the update check can compare against it.
+        versionName = (findProperty("appVersion") as String?) ?: "0.1.0"
     }
 
     buildTypes {
