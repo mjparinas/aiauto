@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -87,12 +88,12 @@ private fun TaskCard(task: Task, onClick: () -> Unit) {
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                Pill(
                     task.repo.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    Modifier.weight(1f, fill = false),
                 )
+                Spacer(Modifier.weight(1f).width(8.dp))
                 StatusPill(task.status)
             }
             Spacer(Modifier.height(6.dp))
