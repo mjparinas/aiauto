@@ -18,6 +18,14 @@ data class PullRequest(
     val state: String = "open",
     val title: String = "",
     val merged: Boolean = false,
+    @SerialName("merged_at") val mergedAt: String? = null,
+    @SerialName("merge_commit_sha") val mergeCommitSha: String? = null,
+)
+
+@Serializable
+data class Release(
+    @SerialName("tag_name") val tagName: String,
+    @SerialName("html_url") val htmlUrl: String,
 )
 
 /** The few GitHub REST calls the app needs, authenticated with the user's token. */
@@ -37,6 +45,17 @@ class GitHub(private val token: String, private val http: OkHttpClient = OkHttpC
 
         fun toRef() = RepoRef(owner.login, name, defaultBranch)
     }
+
+    @Serializable
+    private data class TagJson(val name: String)
+
+    @Serializable
+    private data class NewRelease(
+        @SerialName("tag_name") val tagName: String,
+        @SerialName("target_commitish") val target: String,
+        val name: String,
+        @SerialName("generate_release_notes") val generateNotes: Boolean = true,
+    )
 
     @Serializable
     private data class NewPull(val title: String, val head: String, val base: String, val body: String)
@@ -73,6 +92,15 @@ class GitHub(private val token: String, private val http: OkHttpClient = OkHttpC
     fun pull(repo: RepoRef, number: Int): PullRequest =
         json.decodeFromString(get("/repos/${repo.fullName}/pulls/$number"))
 
+    fun tags(repo: RepoRef): List<String> =
+        json.decodeFromString<List<TagJson>>(get("/repos/${repo.fullName}/tags?per_page=100")).map { it.name }
+
+    /** Publishes a release, creating [tag] at [target] with GitHub's generated notes. */
+    fun createRelease(repo: RepoRef, tag: String, target: String): Release {
+        val payload = json.encodeToString(NewRelease.serializer(), NewRelease(tag, target, tag))
+        return json.decodeFromString(send("POST", "/repos/${repo.fullName}/releases", payload))
+    }
+
     private fun get(path: String) = send("GET", path, null)
 
     private fun send(method: String, path: String, body: String?): String {
@@ -91,6 +119,20 @@ class GitHub(private val token: String, private val http: OkHttpClient = OkHttpC
                 throw GitHubException(response.code, "GitHub: $message")
             }
             return text
+        }
+    }
+
+    companion object {
+        private val version = Regex("""^v?(\d+)\.(\d+)\.(\d+)$""")
+
+        /** The next patch version after the highest semver tag, keeping its v prefix. v0.1.0 when there are none. */
+        fun nextVersion(tags: List<String>): String {
+            val latest = tags.mapNotNull { tag -> version.matchEntire(tag)?.let { tag to it.groupValues.drop(1).map(String::toInt) } }
+                .maxWithOrNull(compareBy({ it.second[0] }, { it.second[1] }, { it.second[2] }))
+                ?: return "v0.1.0"
+            val (major, minor, patch) = latest.second
+            val prefix = if (latest.first.startsWith("v")) "v" else ""
+            return "$prefix$major.$minor.${patch + 1}"
         }
     }
 }

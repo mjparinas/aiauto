@@ -69,6 +69,13 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_aloud", true)
         set(value) = prefs.edit().putBoolean("read_aloud", value).apply()
 
+    /** When auto-release was switched on, or null when it's off. */
+    var autoReleaseSince: Long?
+        get() = prefs.getLong("auto_release_since", 0L).takeIf { it > 0 }
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("auto_release_since") else putLong("auto_release_since", value)
+        }.apply()
+
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
         set(value) = prefs.edit().apply {

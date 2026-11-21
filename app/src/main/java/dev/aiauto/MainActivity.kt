@@ -110,6 +110,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
+                        onAutoRelease = {
+                            g.settings.autoReleaseSince = if (it) System.currentTimeMillis() else null
+                            settings = settings.copy(autoRelease = it)
+                        },
                     )
                 }
             }
@@ -126,6 +130,7 @@ class MainActivity : ComponentActivity() {
         hasGithubToken = graph.secrets.githubToken != null,
         repos = repos,
         readAloud = graph.settings.readAloudInCar,
+        autoRelease = graph.settings.autoReleaseSince != null,
     )
 
     private fun Intent.taskTarget(): Screen? = getStringExtra(EXTRA_TASK)?.let { Screen.Detail(it) }

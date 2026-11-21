@@ -44,6 +44,7 @@ data class SettingsState(
     val hasGithubToken: Boolean,
     val repos: List<RepoRef>,
     val readAloud: Boolean,
+    val autoRelease: Boolean,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -57,6 +58,7 @@ fun SettingsScreen(
     onAddRepo: (String) -> Unit,
     onRemoveRepo: (RepoRef) -> Unit,
     onReadAloud: (Boolean) -> Unit,
+    onAutoRelease: (Boolean) -> Unit,
 ) {
     var anthropic by remember { mutableStateOf("") }
     var github by remember { mutableStateOf("") }
@@ -117,6 +119,20 @@ fun SettingsScreen(
                     onClick = { onAddRepo(repoText); repoText = "" },
                     enabled = !state.busy && repoText.isNotBlank() && state.hasGithubToken,
                 ) { Text("Add") }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("Releases")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Release when a PR is merged", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When a pull request from this app is merged, publishes a GitHub release with the next patch version, like v1.2.3 to v1.2.4. Checks every minute while the app is running.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoRelease, onCheckedChange = onAutoRelease)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)

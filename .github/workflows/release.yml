@@ -33,4 +33,9 @@ jobs:
           TAG: ${{ inputs.version || github.ref_name }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk "aiauto-$TAG.apk"
-          gh release create "$TAG" "aiauto-$TAG.apk" --title "AIAuto $TAG" --target "$GITHUB_SHA" --generate-notes
+          # The app's auto-release creates the release and tag itself; then just attach the APK.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "aiauto-$TAG.apk" --clobber
+          else
+            gh release create "$TAG" "aiauto-$TAG.apk" --title "AIAuto $TAG" --target "$GITHUB_SHA" --generate-notes
+          fi

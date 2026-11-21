@@ -30,6 +30,7 @@ class Graph(context: Context) {
             override fun githubToken() = secrets.githubToken
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
+            override fun autoReleaseSince() = settings.autoReleaseSince
         },
         scope = scope,
         onMessage = { task, message ->

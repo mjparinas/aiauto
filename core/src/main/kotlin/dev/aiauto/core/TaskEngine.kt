@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -23,6 +24,9 @@ interface EngineConfig {
     fun githubToken(): String?
     fun agentSetup(): AgentSetup?
     fun saveAgentSetup(setup: AgentSetup)
+
+    /** When auto-release was switched on, or null when it's off. Only PRs merged after this get a release. */
+    fun autoReleaseSince(): Long? = null
 }
 
 /**
@@ -41,6 +45,7 @@ class TaskEngine(
 ) {
     private val running = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
+    private val releaseLock = Any()
 
     fun isRunning(taskId: String) = running[taskId]?.isActive == true
 
@@ -85,6 +90,37 @@ class TaskEngine(
         store.all()
             .filter { it.sessionId != null && (it.status == TaskStatus.Working || it.status == TaskStatus.Starting) }
             .forEach { task -> launchTurn(task.id) { _, _ -> } }
+    }
+
+    /** Checks pull requests every [intervalMillis] while the app runs, releasing merged ones when auto-release is on. */
+    fun watchMerges(intervalMillis: Long = 60_000): Job = scope.launch(Dispatchers.IO) {
+        while (isActive) {
+            runCatching { checkMerges() }
+            delay(intervalMillis)
+        }
+    }
+
+    /** Looks at each open pull request the app opened. When one was merged after auto-release was switched on, cuts a release. */
+    fun checkMerges(): Unit = synchronized(releaseLock) {
+        val since = config.autoReleaseSince() ?: return
+        val github = githubFactory(config.githubToken() ?: return)
+        for (task in store.all().filter { it.prNumber != null && !it.prClosed }) {
+            val number = task.prNumber!!
+            val pr = runCatching { github.pull(task.repo, number) }.getOrNull() ?: continue
+            if (pr.state != "closed") continue
+            update(task.id) { it.copy(prClosed = true, prMerged = pr.merged) }
+            val mergedAt = pr.mergedAt?.let { Instant.parse(it).toEpochMilli() }
+            if (!pr.merged || mergedAt == null || mergedAt < since) continue
+            runCatching {
+                val tag = GitHub.nextVersion(github.tags(task.repo))
+                github.createRelease(task.repo, tag, pr.mergeCommitSha ?: task.repo.defaultBranch)
+            }.onSuccess { release ->
+                update(task.id) { it.copy(releaseTag = release.tagName) }
+                append(task.id, Speaker.Status, "Pull request $number was merged. Released ${release.tagName}")
+            }.onFailure {
+                append(task.id, Speaker.Status, "Pull request $number was merged, but the release failed: ${it.message}")
+            }
+        }
     }
 
     fun stop(taskId: String) {

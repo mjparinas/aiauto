@@ -62,6 +62,14 @@ a tag like that. Either way, the workflow builds the APK and publishes a release
 Releases are signed with the CI runner's temporary debug key. Android might refuse to install a new version over
 an old one; if it does, uninstall the old one first. A fixed signing key stored as a repo secret would solve this.
 
+## Releasing when a PR is merged
+
+Turn on **Release when a PR is merged** in the app's Settings. While the app is running, it checks the pull
+requests it opened every minute. When one is merged, it publishes a GitHub release on that repo with the next patch
+version (for example `v1.2.3` becomes `v1.2.4`, or `v0.1.0` if the repo has no version tags) and generated notes,
+then tells you in the car. Only PRs merged after you turn the toggle on get a release. The GitHub token already
+has the Contents permission this needs.
+
 ## Limits worth knowing
 
 - There's no public API for your claude.ai or Claude app projects, so this app runs its own agent sessions through

@@ -11,6 +11,7 @@ class AiAutoApp : Application() {
         graph = Graph(this)
         graph.notifier.createChannels()
         graph.engine.resumeAll()
+        graph.engine.watchMerges()
     }
 }
 
