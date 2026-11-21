@@ -3,6 +3,7 @@ package dev.aiauto.core
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -58,13 +59,19 @@ class UpdateSource(
     internal fun parse(body: String, currentVersion: String): AvailableUpdate? {
         val release = json.decodeFromString<ReleaseJson>(body)
         if (release.draft || release.prerelease) return null
-        val apk = release.assets.firstOrNull { it.name.endsWith(".apk") } ?: return null
+        val apk = release.assets.firstOrNull { it.name.endsWith(".apk") && isGitHubDownload(it.url) } ?: return null
         if (!Versions.isNewer(release.tag, currentVersion)) return null
         return AvailableUpdate(release.tag, apk.url, apk.size, release.pageUrl)
     }
 
+    /** Only downloads served by GitHub itself over HTTPS. */
+    private fun isGitHubDownload(url: String): Boolean {
+        val parsed = url.toHttpUrlOrNull() ?: return false
+        return parsed.isHttps && (parsed.host == "github.com" || parsed.host.endsWith(".githubusercontent.com"))
+    }
+
     companion object {
-        const val APP_REPO = "mjparinas/aiauto"
+        const val APP_REPO = "mjparinas/cruisecontrol"
     }
 }
 
