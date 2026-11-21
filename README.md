@@ -109,6 +109,14 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
 - **Standing rules.** Tick common rules, like always adding tests or leaving CI files alone, and add your own, one
   per line. They're added to Claude's instructions for every task.
 - Changing any of these makes a new agent for the next task. Tasks already running keep the agent they started with.
+- **Listen when opened** (on by default): the car screen starts listening as soon as it opens, so saying
+  "Hey Google, open Cruise Control", or pressing the steering-wheel voice button and saying that, is enough to start
+  talking. Android Auto doesn't let other apps take over the voice button itself.
+- **Briefing when you get in** (on by default): when the phone connects to the car, Claude reads what happened
+  since your last drive, up to a day back: merged pull requests, finished and failed tasks, questions waiting for
+  you and what you've spent today. If the car screen is open it reads it there, then listens.
+- **Remember past drives** (on by default): the car chat keeps your last 20 exchanges on the phone and gives them
+  to Claude at the start of the next drive. **Forget past drives** clears them.
 - **Speaking speed and voice** are under In the car. The voice list shows the phone's text-to-speech voices for its
   language, and a sample plays when you pick one.
 

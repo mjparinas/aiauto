@@ -74,6 +74,20 @@ class RepoStore(context: Context) {
     fun find(fullName: String) = list.flow.value.firstOrNull { it.fullName == fullName }
 }
 
+/** Past car-chat exchanges, newest last, so the next drive can pick up where this one left off. */
+class FileChatMemory(context: Context) : dev.aiauto.core.ChatMemory {
+    private val list = JsonListFile(File(context.filesDir, "chat_memory.json"), dev.aiauto.core.ChatExchange.serializer())
+
+    override fun recent() = list.flow.value
+
+    @Synchronized
+    override fun remember(exchange: dev.aiauto.core.ChatExchange) =
+        list.set((list.flow.value + exchange).takeLast(dev.aiauto.core.ChatMemory.KEEP))
+
+    @Synchronized
+    override fun forget() = list.set(emptyList())
+}
+
 /** Saved task templates. A new install starts with [TaskTemplate.defaults]; deleting them all keeps the list empty. */
 class TemplateStore(context: Context) {
     private val file = File(context.filesDir, "templates.json")
@@ -112,6 +126,26 @@ class Settings(context: Context) {
     var quietMode: Boolean
         get() = prefs.getBoolean("quiet_mode", false)
         set(value) = prefs.edit().putBoolean("quiet_mode", value).apply()
+
+    /** Start listening as soon as the car screen opens, so "Hey Google, open Cruise Control" is all it takes. */
+    var listenOnOpen: Boolean
+        get() = prefs.getBoolean("listen_on_open", true)
+        set(value) = prefs.edit().putBoolean("listen_on_open", value).apply()
+
+    /** Read a summary of what happened since the last drive when the phone connects to the car. */
+    var briefingOnConnect: Boolean
+        get() = prefs.getBoolean("briefing", true)
+        set(value) = prefs.edit().putBoolean("briefing", value).apply()
+
+    /** Let the car chat remember past drives. */
+    var rememberChats: Boolean
+        get() = prefs.getBoolean("remember_chats", true)
+        set(value) = prefs.edit().putBoolean("remember_chats", value).apply()
+
+    /** When the phone last disconnected from the car, or 0 if it never has. */
+    var lastDriveEndedMillis: Long
+        get() = prefs.getLong("last_drive_ended", 0L)
+        set(value) = prefs.edit().putLong("last_drive_ended", value).apply()
 
     /** Daily spending cap in US dollars, or null for none. New installs start at [DEFAULT_DAILY_LIMIT]. */
     var dailyLimitUsd: Double?

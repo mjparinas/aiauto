@@ -229,6 +229,10 @@ class MainActivity : ComponentActivity() {
                         onSpeechRate = { g.settings.speechRate = it; settings = settings.copy(speechRate = it) },
                         onVoice = { g.settings.voiceName = it; settings = settings.copy(voiceName = it) },
                         onPreviewVoice = { g.speaker.stop(); g.speaker.speak("This is how I'll sound in the car.") },
+                        onListenOnOpen = { g.settings.listenOnOpen = it; settings = settings.copy(listenOnOpen = it) },
+                        onBriefing = { g.settings.briefingOnConnect = it; settings = settings.copy(briefing = it) },
+                        onRememberChats = { g.settings.rememberChats = it; settings = settings.copy(rememberChats = it) },
+                        onForgetChats = { g.chatMemory.forget(); settings = settings.copy(message = "The car chat forgot your past drives.") },
                         onCheckUpdate = {
                             settings = settings.copy(busy = true, message = "Checking for updates…")
                             android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
@@ -275,6 +279,9 @@ class MainActivity : ComponentActivity() {
         chatProfile = graph.settings.chatProfile,
         speechRate = graph.settings.speechRate,
         voiceName = graph.settings.voiceName,
+        listenOnOpen = graph.settings.listenOnOpen,
+        briefing = graph.settings.briefingOnConnect,
+        rememberChats = graph.settings.rememberChats,
     )
 
     private inline fun <reified E : Enum<E>> enumOrDefault(name: String, default: E): E =

@@ -13,6 +13,7 @@ import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
 import dev.aiauto.core.Projects
 import dev.aiauto.core.TaskEngine
+import dev.aiauto.data.FileChatMemory
 import dev.aiauto.core.VoiceControls
 import dev.aiauto.data.FileTaskStore
 import dev.aiauto.data.RepoStore
@@ -35,6 +36,7 @@ class Graph(context: Context) {
     val settings = Settings(context)
     val tasks = FileTaskStore(context)
     val repos = RepoStore(context)
+    val chatMemory = FileChatMemory(context)
     val templates = TemplateStore(context)
     val speaker = Speaker(context, settings)
     val notifier = Notifier(context, settings, speaker)
@@ -145,7 +147,26 @@ class Graph(context: Context) {
         canSpend = { settings.dailyLimitUsd?.let { settings.spentTodayUsd < it } ?: true },
         onSpend = { settings.addSpend(it) },
         profile = { settings.chatProfile },
+        memory = { if (settings.rememberChats) chatMemory else dev.aiauto.core.NoChatMemory },
     )
+
+    private var briefing: String? = null
+
+    /** The welcome-back summary waiting to be read, if any. The car's mic screen takes it to read it itself. */
+    @Synchronized
+    fun takeBriefing(): String? = briefing.also { briefing = null }
+
+    /** Works out the summary of what happened since the last drive and reads it if the mic screen doesn't. */
+    private fun prepareBriefing() {
+        if (!settings.briefingOnConnect || !isConfigured) return
+        val since = maxOf(settings.lastDriveEndedMillis, System.currentTimeMillis() - BRIEFING_WINDOW_MILLIS)
+        val text = dev.aiauto.core.Briefing.since(tasks.all(), since, settings.spentTodayUsd) ?: return
+        synchronized(this) { briefing = text }
+        scope.launch {
+            kotlinx.coroutines.delay(BRIEFING_DELAY_MILLIS)
+            takeBriefing()?.let { if (settings.readAloudInCar && speaker.inCar) speaker.speak(it) }
+        }
+    }
 
     /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */
     val projects = Projects(githubToken = { secrets.githubToken }, scope = scope)
@@ -165,8 +186,14 @@ class Graph(context: Context) {
             CarConnection(context.applicationContext).type.observeForever { type ->
                 val now = type == CarConnection.CONNECTION_TYPE_PROJECTION || type == CarConnection.CONNECTION_TYPE_NATIVE
                 try {
-                    if (now && !connected && isConfigured) notifier.startChat()
-                    if (!now && connected) notifier.clearChat()
+                    if (now && !connected && isConfigured) {
+                        notifier.startChat()
+                        prepareBriefing()
+                    }
+                    if (!now && connected) {
+                        notifier.clearChat()
+                        settings.lastDriveEndedMillis = System.currentTimeMillis()
+                    }
                     // Make sure the foreground service holds running tasks before and after the car goes away,
                     // so work started from the car keeps going on the phone until it's done.
                     if (now != connected && hasActiveWork()) TaskService.ensureRunning(context)
@@ -211,4 +238,11 @@ class Graph(context: Context) {
     }
 
     val isConfigured: Boolean get() = secrets.anthropicKey != null && secrets.githubToken != null
+
+    private companion object {
+        /** Gives the car screen time to open and read the briefing itself, before music starts. */
+        const val BRIEFING_DELAY_MILLIS = 8_000L
+        /** Never brief on more than the last day, even after a long time away. */
+        const val BRIEFING_WINDOW_MILLIS = 24 * 60 * 60_000L
+    }
 }
