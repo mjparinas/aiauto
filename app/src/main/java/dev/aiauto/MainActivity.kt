@@ -192,7 +192,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
                         onQuietMode = { g.settings.quietMode = it; settings = settings.copy(quietMode = it) },
                         onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },
