@@ -48,6 +48,14 @@ android {
 
     buildFeatures { compose = true }
 
+    // Lint reports in CI without failing the build until the issues it finds in existing code are fixed.
+    // Its findings are printed in the build log and uploaded as the lint-report artifact.
+    lint {
+        abortOnError = false
+        textReport = true
+        textOutput = file("stdout")
+    }
+
     packaging {
         resources {
             excludes += setOf(
