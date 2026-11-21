@@ -135,11 +135,6 @@ class MainActivity : ComponentActivity() {
                             running = g.engine.isRunning(task.id) || task.status == dev.aiauto.core.TaskStatus.Working || task.status == dev.aiauto.core.TaskStatus.Starting,
                             onBack = { screen = Screen.Home },
                             onStop = { g.engine.stop(task.id) },
-                            onClear = {
-                                g.engine.clear(task.id)
-                                g.notifier.clear(task.id)
-                                screen = Screen.Home
-                            },
                             onArchive = {
                                 g.engine.archive(task.id)
                                 g.notifier.clear(task.id)
