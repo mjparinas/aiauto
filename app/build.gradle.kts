@@ -5,6 +5,10 @@ plugins {
     kotlin("plugin.compose")
 }
 
+// Release signing key, provided by the Release workflow from repository secrets. Every release signed
+// with the same key installs over the previous one. Without it, releases fall back to the debug key.
+val releaseKeystore = System.getenv("RELEASE_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
+
 android {
     namespace = "dev.aiauto"
     compileSdk = 35
@@ -13,16 +17,26 @@ android {
         applicationId = "dev.aiauto"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        // The release workflow passes -PappVersion from the tag so the update check can compare against it.
-        versionName = (findProperty("appVersion") as String?) ?: "0.1.0"
+        // Releases pass an increasing build number and the tag, so Android accepts each one as an update.
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("VERSION_NAME")?.removePrefix("v") ?: "0.1.0"
+    }
+
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the APK installs without extra setup. Use your own key for Play.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
 

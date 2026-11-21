@@ -3,22 +3,53 @@ package dev.aiauto.notify
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.RemoteInput
 import dev.aiauto.TaskService
 import dev.aiauto.graph
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /** Handles voice replies and "mark as read" from the phone or the car. */
 class ReplyReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // A reply that fails to send must not crash the app while someone is driving.
+        try {
+            handle(context, intent)
+        } catch (e: Throwable) {
+            Log.e("AiAuto", "Couldn't handle a reply", e)
+        }
+    }
+
+    private fun handle(context: Context, intent: Intent) {
         val target = intent.getStringExtra(EXTRA_TARGET) ?: return
         val g = context.graph
         if (intent.action == ACTION_READ) {
+            if (target == Notifier.CHAT_TARGET) return
             if (target.startsWith(Notifier.NEW_PREFIX)) g.repos.find(target.removePrefix(Notifier.NEW_PREFIX))?.let(g.notifier::clearNewTask)
             else g.notifier.clear(target)
             return
         }
         val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.trim()
         if (text.isNullOrEmpty()) return
+        if (target == Notifier.CHAT_TARGET) {
+            // Show the question right away so the car stops waiting, then answer when Claude replies.
+            g.notifier.postChat(fromYou = text)
+            val pending = goAsync()
+            g.scope.launch(Dispatchers.IO) {
+                try {
+                    val answer = g.assistant.ask(text)
+                    g.notifier.postChat(fromClaude = answer)
+                    if (g.speaker.inCar) g.speaker.speak(answer)
+                } catch (e: Throwable) {
+                    Log.e("AiAuto", "Couldn't answer a chat reply", e)
+                    runCatching { g.notifier.postChat(fromClaude = "Sorry, that didn't go through. Try again.") }
+                } finally {
+                    pending.finish()
+                }
+            }
+            return
+        }
         if (target.startsWith(Notifier.NEW_PREFIX)) {
             val repo = g.repos.find(target.removePrefix(Notifier.NEW_PREFIX)) ?: return
             g.notifier.clearNewTask(repo)
