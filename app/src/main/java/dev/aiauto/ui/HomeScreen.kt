@@ -57,6 +57,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -173,8 +176,8 @@ private fun TaskList(
             SectionHeader("Today · ${SpokenStatus.money(spentToday)}" + (dailyLimit?.let { " of ${SpokenStatus.money(it)}" } ?: ""), inset = 16.dp)
         }
         items(tasks, key = { it.id }) { task ->
-            if (onArchive == null) TaskCard(task) { onOpen(task) }
-            else SwipeToArchive(onArchive = { onArchive(task) }) { TaskCard(task) { onOpen(task) } }
+            if (onArchive == null) TaskCard(task, onArchive = null) { onOpen(task) }
+            else SwipeToArchive(onArchive = { onArchive(task) }) { TaskCard(task, onArchive = { onArchive(task) }) { onOpen(task) } }
         }
     }
 }
@@ -201,16 +204,21 @@ private fun SwipeToArchive(onArchive: () -> Unit, content: @Composable () -> Uni
                     .padding(horizontal = 24.dp),
                 contentAlignment = alignment,
             ) {
-                Icon(Icons.Rounded.Archive, contentDescription = "Archive", tint = MaterialTheme.colorScheme.primary)
+                // Decorative: the card itself offers Archive to screen readers.
+                Icon(Icons.Rounded.Archive, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
         },
     ) { content() }
 }
 
 @Composable
-private fun TaskCard(task: Task, onClick: () -> Unit) {
+private fun TaskCard(task: Task, onArchive: (() -> Unit)?, onClick: () -> Unit) {
     val (icon, hue) = task.status.badge(task.interrupted)
-    RoundCard(onClick = onClick) {
+    // Swiping is hard or impossible with TalkBack or switch access, so archiving is also in the card's actions menu.
+    val actions = if (onArchive == null) Modifier else Modifier.semantics {
+        customActions = listOf(CustomAccessibilityAction("Archive") { onArchive(); true })
+    }
+    RoundCard(actions, onClick = onClick, onClickLabel = "open chat") {
         Row(verticalAlignment = Alignment.Top) {
             IconBadge(icon, hue)
             Spacer(Modifier.width(14.dp))
