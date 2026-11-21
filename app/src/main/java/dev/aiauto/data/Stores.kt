@@ -69,6 +69,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_aloud", true)
         set(value) = prefs.edit().putBoolean("read_aloud", value).apply()
 
+    /** Name of a [dev.aiauto.ui.ThemeMode]. */
+    var themeMode: String
+        get() = prefs.getString("theme_mode", null) ?: "System"
+        set(value) = prefs.edit().putString("theme_mode", value).apply()
+
+    /** Name of a [dev.aiauto.ui.Accent]. */
+    var accent: String
+        get() = prefs.getString("accent", null) ?: "Clay"
+        set(value) = prefs.edit().putString("accent", value).apply()
+
     var agentSetup: AgentSetup?
         get() = prefs.getString("agent_setup", null)?.let { runCatching { json.decodeFromString(AgentSetup.serializer(), it) }.getOrNull() }
         set(value) = prefs.edit().apply {

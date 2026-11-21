@@ -17,12 +17,14 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.aiauto.core.GitHub
 import dev.aiauto.core.RepoRef
+import dev.aiauto.ui.Accent
 import dev.aiauto.ui.AiAutoTheme
 import dev.aiauto.ui.HomeScreen
 import dev.aiauto.ui.NewTaskScreen
 import dev.aiauto.ui.SettingsScreen
 import dev.aiauto.ui.SettingsState
 import dev.aiauto.ui.TaskScreen
+import dev.aiauto.ui.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,7 +49,9 @@ class MainActivity : ComponentActivity() {
         screen = intent.taskTarget() ?: if (g.isConfigured) Screen.Home else Screen.Settings
 
         setContent {
-            AiAutoTheme {
+            var themeMode by remember { mutableStateOf(enumOrDefault(g.settings.themeMode, ThemeMode.System)) }
+            var accent by remember { mutableStateOf(enumOrDefault(g.settings.accent, Accent.Clay)) }
+            AiAutoTheme(mode = themeMode, accent = accent) {
                 val tasks by g.tasks.tasks.collectAsStateWithLifecycle()
                 val repos by g.repos.repos.collectAsStateWithLifecycle()
                 val scope = rememberCoroutineScope()
@@ -81,7 +85,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Screen.Settings -> SettingsScreen(
-                        state = settingsState(repos).copy(busy = settings.busy, message = settings.message),
+                        state = settingsState(repos).copy(busy = settings.busy, message = settings.message, themeMode = themeMode, accent = accent),
                         onBack = { screen = Screen.Home },
                         onSaveKeys = { anthropic, github ->
                             if (anthropic.isNotBlank()) {
@@ -110,6 +114,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onRemoveRepo = { g.repos.remove(it) },
                         onReadAloud = { g.settings.readAloudInCar = it; settings = settings.copy(readAloud = it) },
+                        onThemeMode = { g.settings.themeMode = it.name; themeMode = it },
+                        onAccent = { g.settings.accent = it.name; accent = it },
                     )
                 }
             }
@@ -126,7 +132,12 @@ class MainActivity : ComponentActivity() {
         hasGithubToken = graph.secrets.githubToken != null,
         repos = repos,
         readAloud = graph.settings.readAloudInCar,
+        themeMode = enumOrDefault(graph.settings.themeMode, ThemeMode.System),
+        accent = enumOrDefault(graph.settings.accent, Accent.Clay),
     )
+
+    private inline fun <reified E : Enum<E>> enumOrDefault(name: String, default: E): E =
+        enumValues<E>().firstOrNull { it.name == name } ?: default
 
     private fun Intent.taskTarget(): Screen? = getStringExtra(EXTRA_TASK)?.let { Screen.Detail(it) }
 
