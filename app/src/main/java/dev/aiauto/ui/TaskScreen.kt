@@ -92,7 +92,7 @@ fun TaskScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             StatusPill(task.status, interrupted = task.interrupted)
                             Text(
-                                task.repo.fullName,
+                                task.repo.name,
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
