@@ -44,7 +44,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.getValue
@@ -66,7 +65,6 @@ fun TaskScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onStop: () -> Unit,
-    onClear: () -> Unit,
     onArchive: () -> Unit,
     onUnarchive: () -> Unit,
     onMerge: () -> Unit,
@@ -75,17 +73,7 @@ fun TaskScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var confirmMerge by remember { mutableStateOf(false) }
-    var confirmClear by remember { mutableStateOf(false) }
     if (confirmMerge) task.prNumber?.let { ConfirmMergeDialog(it, task.checks, onConfirm = onMerge, onDismiss = { confirmMerge = false }) }
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("Clear this task?") },
-            text = { Text(if (running) "Claude will be stopped. Its pull request stays on GitHub." else "Its pull request stays on GitHub.") },
-            confirmButton = { TextButton(onClick = { confirmClear = false; onClear() }) { Text("Clear") } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
-        )
-    }
     val list = rememberLazyListState()
     LaunchedEffect(task.messages.size) { if (task.messages.isNotEmpty()) list.animateScrollToItem(task.messages.size - 1) }
 
@@ -114,7 +102,6 @@ fun TaskScreen(
                     } else {
                         IconButton(onClick = onArchive) { Icon(Icons.Rounded.Archive, "Archive") }
                     }
-                    IconButton(onClick = { confirmClear = true }) { Icon(Icons.Rounded.DeleteOutline, "Clear task") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
