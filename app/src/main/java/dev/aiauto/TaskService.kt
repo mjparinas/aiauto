@@ -30,7 +30,7 @@ class TaskService : Service() {
         if (watcher?.isActive != true) {
             watcher = CoroutineScope(Dispatchers.Default).launch {
                 delay(5_000)
-                while (graph.tasks.all().any { graph.engine.isRunning(it.id) }) delay(5_000)
+                while (graph.tasks.all().any { graph.engine.isBusy(it.id) }) delay(5_000)
                 stopSelf()
             }
         }

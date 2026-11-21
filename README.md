@@ -25,6 +25,21 @@ Voice input in the car goes through Android Auto's messaging flow. Open an AIAut
 Your reply becomes the next prompt for that task. To start a new task in the car, tap **New task**, pick a
 repo, then reply to the message that appears.
 
+## Voice commands
+
+The app handles a few short replies itself, without waiting for Claude:
+
+- **"Status"** reads where the task is.
+- **"Stop"** interrupts Claude. Your next reply gives it new directions.
+- **"Merge it"** checks that the pull request has no conflicts and CI passed, then asks you to confirm. Say
+  **"yes"** to merge.
+- **"Fix it"** sends the latest CI failure to Claude.
+
+After a pull request opens or gets new commits, the app watches its GitHub Actions runs and tells you whether they
+passed. If they fail, it names the failing step and asks whether Claude should fix it.
+
+Anything longer goes to Claude as usual, so "merge the two settings screens" is still a coding request.
+
 ## Setup
 
 1. **Get the APK.** Download `aiauto-vX.Y.Z.apk` from the latest
@@ -34,7 +49,8 @@ repo, then reply to the message that appears.
 2. **Claude API key.** Create one at [platform.claude.com](https://platform.claude.com). Usage is billed to that
    account. The model is Claude Opus 5.5, and each task is a Managed Agents session.
 3. **GitHub token.** Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for
-   the repos you want to use. Set **Contents** and **Pull requests** to read and write.
+   the repos you want to use. Set **Contents** and **Pull requests** to read and write, and **Actions** to read so
+   the app can report CI results.
 4. **Settings in the app.** Paste both, then add repos as `owner/name`. The key and token are encrypted with the
    Android Keystore. The GitHub token is also sent to Anthropic for each session, so the sandbox can clone and
    push. Anthropic's proxy adds the token to git requests outside the sandbox, so code running in the sandbox

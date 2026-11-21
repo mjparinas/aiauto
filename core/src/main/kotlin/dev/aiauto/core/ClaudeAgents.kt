@@ -17,6 +17,7 @@ import com.anthropic.models.beta.sessions.BetaManagedAgentsGitHubRepositoryResou
 import com.anthropic.models.beta.sessions.SessionCreateParams
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsAgentEvaluatedPermission
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsStreamSessionEvents
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEventParams
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams
 import com.anthropic.models.beta.sessions.events.EventSendParams
@@ -124,6 +125,16 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
         )
     }
 
+    /** Asks Claude to stop what it's doing. The session stays open for the next prompt. */
+    fun interrupt(sessionId: String) {
+        client.beta().sessions().events().send(
+            sessionId,
+            EventSendParams.builder()
+                .addEvent(BetaManagedAgentsUserInterruptEventParams.builder().build())
+                .build(),
+        )
+    }
+
     /**
      * Streams the session until Claude finishes its turn, fails, or [shouldStop] returns true.
      * Opens the stream first, then lists past events so nothing is reported twice after a reconnect.
@@ -224,6 +235,14 @@ class ClaudeAgents(apiKey: String) : AutoCloseable {
             Request (spoken while driving, so it may contain transcription mistakes):
             $request
         """.trimIndent()
+
+        /** Sent when the driver asks Claude to fix a CI failure the app reported. */
+        fun fixBuildPrompt(failure: String): String = """
+            |The GitHub Actions checks failed on your branch after your last push.
+            |$failure
+            |You can't open that link. Reproduce the failure by running the same build or tests here, fix it,
+            |commit, and push to the same branch.
+        """.trimMargin()
 
         val SYSTEM_PROMPT = """
             You are a coding agent controlled from a phone app that the user often runs while driving.

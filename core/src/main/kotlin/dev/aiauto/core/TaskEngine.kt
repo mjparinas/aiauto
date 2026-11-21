@@ -38,11 +38,17 @@ class TaskEngine(
     private val githubFactory: (String) -> GitHub = { GitHub(it) },
     /** Called for each new line, so the app can notify and read it aloud. */
     private val onMessage: (Task, TaskMessage) -> Unit = { _, _ -> },
+    private val ciPollMillis: Long = 30_000,
+    private val ciTimeoutMillis: Long = 45 * 60_000,
 ) {
     private val running = ConcurrentHashMap<String, Job>()
+    private val ciWatchers = ConcurrentHashMap<String, Job>()
     private val seenEvents = ConcurrentHashMap<String, MutableSet<String>>()
 
     fun isRunning(taskId: String) = running[taskId]?.isActive == true
+
+    /** True while Claude is working or the app is waiting on CI for this task. */
+    fun isBusy(taskId: String) = isRunning(taskId) || ciWatchers[taskId]?.isActive == true
 
     /** Starts a new task on [repo] from a spoken or typed [request]. Returns the new task. */
     fun start(repo: RepoRef, request: String): Task {
@@ -68,10 +74,30 @@ class TaskEngine(
         return store.get(id)!!
     }
 
-    /** Adds a follow-up prompt to an existing task. */
+    /**
+     * Adds a follow-up prompt to an existing task. Short commands like "status", "stop", "merge it"
+     * and yes or no answers to the app's own questions are handled here without a Claude turn.
+     */
     fun prompt(taskId: String, text: String) {
         val task = store.get(taskId) ?: return
         append(taskId, Speaker.You, text)
+        val command = VoiceCommand.parse(text)
+        val pending = task.pending
+        if (pending != null) update(taskId) { it.copy(pending = null) }
+        when {
+            command == VoiceCommand.Yes && pending == PendingAction.Merge -> return background(taskId, "merge") { merge(taskId) }
+            command == VoiceCommand.Yes && pending == PendingAction.FixBuild -> return fixBuild(taskId)
+            command == VoiceCommand.FixBuild && task.ciFailure != null -> return fixBuild(taskId)
+            command == VoiceCommand.No && pending != null -> return say(taskId, "Okay, leaving it as is")
+            command == VoiceCommand.Stop -> return stopTurn(taskId)
+            command == VoiceCommand.Status -> return say(taskId, statusLine(task))
+            command == VoiceCommand.Merge -> return background(taskId, "check the pull request") { askToMerge(taskId) }
+        }
+        sendToClaude(taskId, text)
+    }
+
+    private fun sendToClaude(taskId: String, text: String) {
+        val task = store.get(taskId) ?: return
         val sessionId = task.sessionId
         if (sessionId == null) {
             fail(taskId, "This task never got a session. Start a new task.")
@@ -89,6 +115,124 @@ class TaskEngine(
 
     fun stop(taskId: String) {
         running.remove(taskId)?.cancel()
+    }
+
+    private fun stopTurn(taskId: String) {
+        val task = store.get(taskId) ?: return
+        if (!isRunning(taskId)) return say(taskId, "Claude isn't working on this right now")
+        stop(taskId)
+        update(taskId) { it.copy(status = TaskStatus.NeedsInput) }
+        say(taskId, "Stopped Claude. Reply to give it new directions")
+        val sessionId = task.sessionId ?: return
+        val key = config.anthropicKey() ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching { claudeFactory(key).use { it.interrupt(sessionId) } }
+        }
+    }
+
+    private fun statusLine(task: Task): String {
+        val pr = task.prNumber?.let { "PR $it" }
+        return when {
+            isRunning(task.id) -> {
+                val last = task.messages.lastOrNull { it.speaker != Speaker.You }?.text?.trimEnd('.')
+                "Claude is working on it" + (last?.let { ". Latest: $it" } ?: "")
+            }
+            ciWatchers[task.id]?.isActive == true -> "Waiting for checks to finish on $pr"
+            task.status == TaskStatus.Failed -> "This task failed: " + (task.messages.lastOrNull { it.speaker == Speaker.Status }?.text ?: "no details")
+            task.ciFailure != null -> "Checks failed on $pr. Say fix it to have Claude look into it"
+            pr != null -> "$pr is open for review"
+            task.status == TaskStatus.NeedsInput -> "Claude is waiting for your answer"
+            else -> "Claude finished, and there's no pull request"
+        }
+    }
+
+    /** Checks the pull request and CI, then asks the driver to confirm the merge. */
+    private fun askToMerge(taskId: String) {
+        val task = store.get(taskId) ?: return
+        val number = task.prNumber ?: return say(taskId, "There's no pull request to merge yet")
+        if (isRunning(taskId)) return say(taskId, "Claude is still working. Say merge once it's done")
+        val github = githubFactory(requireNotNull(config.githubToken()) { "Add a GitHub token in Settings." })
+        val pr = github.pull(task.repo, number)
+        when {
+            pr.merged -> return say(taskId, "PR $number is already merged")
+            pr.state != "open" -> return say(taskId, "PR $number is closed")
+            pr.mergeable == false -> return say(taskId, "PR $number has conflicts with ${task.repo.defaultBranch}, so it can't be merged as is")
+        }
+        val ci = pr.head?.sha?.let { github.ci(task.repo, it) } ?: CiResult(CiState.None)
+        when (ci.state) {
+            CiState.Pending -> say(taskId, "Checks are still running on PR $number. Ask again when they're done")
+            CiState.Failed -> {
+                update(taskId) { it.copy(pending = PendingAction.FixBuild, ciFailure = ci.details, status = TaskStatus.NeedsInput) }
+                say(taskId, "${ci.summary}, so I won't merge PR $number. Say yes to have Claude fix it")
+            }
+            CiState.Passed, CiState.None -> {
+                update(taskId) { it.copy(pending = PendingAction.Merge, status = TaskStatus.NeedsInput) }
+                val checks = if (ci.state == CiState.Passed) "${ci.summary}. " else "No checks ran. "
+                say(taskId, checks + "Say yes to merge PR $number into ${task.repo.defaultBranch}")
+            }
+        }
+    }
+
+    private fun merge(taskId: String) {
+        val task = store.get(taskId) ?: return
+        val number = task.prNumber ?: return
+        githubFactory(requireNotNull(config.githubToken()) { "Add a GitHub token in Settings." }).merge(task.repo, number)
+        update(taskId) { it.copy(status = TaskStatus.Done) }
+        say(taskId, "Merged PR $number into ${task.repo.defaultBranch}")
+    }
+
+    private fun fixBuild(taskId: String) {
+        val failure = store.get(taskId)?.ciFailure ?: return
+        update(taskId) { it.copy(ciFailure = null) }
+        sendToClaude(taskId, ClaudeAgents.fixBuildPrompt(failure))
+    }
+
+    /** Runs a GitHub call off the caller's thread and reports a failure as a spoken line. */
+    private fun background(taskId: String, what: String, block: () -> Unit) {
+        scope.launch(Dispatchers.IO) {
+            runCatching(block).onFailure { say(taskId, "Couldn't $what: ${it.message}") }
+        }
+    }
+
+    private fun say(taskId: String, text: String) = append(taskId, Speaker.Status, text)
+
+    /**
+     * Polls GitHub Actions for the pull request's latest commit and announces the result once.
+     * Gives up quietly when the repo has no workflows.
+     */
+    internal fun watchCi(taskId: String) {
+        ciWatchers.remove(taskId)?.cancel()
+        val job = scope.launch(Dispatchers.IO) {
+            val deadline = clock() + ciTimeoutMillis
+            var emptyPolls = 0
+            while (isActive && clock() < deadline) {
+                delay(ciPollMillis)
+                val task = store.get(taskId) ?: return@launch
+                val number = task.prNumber ?: return@launch
+                val github = githubFactory(config.githubToken() ?: return@launch)
+                val (sha, ci) = runCatching {
+                    val sha = github.pull(task.repo, number).head?.sha
+                    sha?.let { it to github.ci(task.repo, it) }
+                }.getOrNull() ?: continue
+                if (sha == task.ciSha) return@launch
+                when (ci.state) {
+                    CiState.None -> if (++emptyPolls >= 4) return@launch
+                    CiState.Pending -> emptyPolls = 0
+                    CiState.Passed -> {
+                        update(taskId) { it.copy(ciSha = sha, ciFailure = null) }
+                        say(taskId, "${ci.summary} on PR $number. Say merge to merge it")
+                        return@launch
+                    }
+                    CiState.Failed -> {
+                        update(taskId) { it.copy(ciSha = sha, ciFailure = ci.details, pending = PendingAction.FixBuild, status = TaskStatus.NeedsInput) }
+                        say(taskId, "${ci.summary} on PR $number. Say yes to have Claude fix it")
+                        return@launch
+                    }
+                }
+            }
+        }
+        ciWatchers[taskId] = job
+        job.invokeOnCompletion { ciWatchers.remove(taskId, job) }
     }
 
     private fun launchTurn(taskId: String, begin: (ClaudeAgents, Task) -> Unit) {
@@ -164,6 +308,7 @@ class TaskEngine(
         }
         val asked = store.get(taskId)?.messages?.lastOrNull { it.speaker == Speaker.Claude }?.text?.trimEnd()?.endsWith("?") == true
         update(taskId) { it.copy(status = if (asked) TaskStatus.NeedsInput else TaskStatus.Done) }
+        if (store.get(taskId)?.prNumber != null) watchCi(taskId)
     }
 
     private fun prBody(task: Task): String = buildString {

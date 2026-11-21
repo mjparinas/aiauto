@@ -26,6 +26,10 @@ data class RepoRef(
 @Serializable
 enum class TaskStatus { Starting, Working, NeedsInput, Done, Failed }
 
+/** Something the app asked the driver to confirm with a yes or no. */
+@Serializable
+enum class PendingAction { Merge, FixBuild }
+
 @Serializable
 enum class Speaker { You, Claude, Status }
 
@@ -49,6 +53,11 @@ data class Task(
     val status: TaskStatus = TaskStatus.Starting,
     val prUrl: String? = null,
     val prNumber: Int? = null,
+    val pending: PendingAction? = null,
+    /** The last commit whose CI result was announced, so each push is reported once. */
+    val ciSha: String? = null,
+    /** What failed in CI on that commit, handed to Claude when the driver says "fix it". */
+    val ciFailure: String? = null,
     val messages: List<TaskMessage> = emptyList(),
     val createdMillis: Long,
     val updatedMillis: Long,
