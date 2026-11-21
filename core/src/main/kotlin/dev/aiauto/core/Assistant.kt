@@ -27,6 +27,18 @@ interface AssistantActions {
 
     /** Saves a repo from its spoken name (owner/name or just the name). Returns what to tell Claude. */
     fun addRepo(name: String): String
+
+    /** Where a task, a pull request, a repo, or everything that's going stands. Blank or null means not given. */
+    fun status(repo: String, prNumber: Int?, taskId: String): String = throw UnsupportedOperationException("Status isn't available.")
+
+    /** Stops a task, or the only running one when [taskId] is blank. Returns what to tell Claude. */
+    fun stopTask(taskId: String): String = throw UnsupportedOperationException("Stopping isn't available.")
+
+    /** Checks whether a pull request can merge, without merging it. */
+    fun previewMerge(repo: String, prNumber: Int?): MergePreview = throw UnsupportedOperationException("Merging isn't available.")
+
+    /** Merges a pull request the driver confirmed. Returns what to tell Claude. */
+    fun merge(repo: RepoRef, number: Int): String = throw UnsupportedOperationException("Merging isn't available.")
 }
 
 /**
@@ -47,6 +59,9 @@ class Assistant(
     private val history = mutableListOf<MessageParam>()
     /** Exchanges remembered before this start are from earlier drives, so they go in the system prompt. */
     private var startedMillis = clock()
+    /** Counts the driver's questions, so a merge can only be confirmed by a later one. */
+    private var turn = 0
+    private val merges = MergeConfirmation(actions)
     private var client: AnthropicClient? = null
     private var clientKey: String? = null
 
@@ -57,6 +72,7 @@ class Assistant(
         val start = history.size
         return try {
             val claude = clientFor(key)
+            turn++
             history += MessageParam.ofUser(spoken)
             converse(claude).also { reply ->
                 runCatching { memory().remember(ChatExchange(spoken, reply, clock())) }
@@ -73,6 +89,7 @@ class Assistant(
     fun reset() {
         history.clear()
         startedMillis = clock()
+        merges.clear()
     }
 
     private fun converse(claude: AnthropicClient): String {
@@ -99,11 +116,16 @@ class Assistant(
     private fun run(call: ToolUseBlock): ToolResultBlockParam {
         val input = call._input().asObject().orElse(emptyMap())
         fun arg(name: String) = input[name]?.asString()?.orElse(null)?.trim().orEmpty()
+        fun number(name: String): Int? = input[name]?.asNumber()?.orElse(null)?.toInt() ?: arg(name).filter { it.isDigit() }.toIntOrNull()
+        fun flag(name: String): Boolean = input[name]?.asBoolean()?.orElse(null) ?: arg(name).equals("true", ignoreCase = true)
         val (text, error) = runCatching {
             when (call.name()) {
                 START_TASK -> actions.startTask(arg("repo"), arg("request"))
                 REPLY_TO_TASK -> actions.replyToTask(arg("task_id"), arg("text"))
                 ADD_REPO -> actions.addRepo(arg("name"))
+                GET_STATUS -> actions.status(arg("repo"), number("pr_number"), arg("task_id"))
+                STOP_TASK -> actions.stopTask(arg("task_id"))
+                MERGE -> merges.handle(arg("repo"), number("pr_number"), flag("confirmed"), turn)
                 else -> throw IllegalArgumentException("Unknown tool ${call.name()}")
             }
         }.fold({ it to false }, { (it.message ?: "That didn't work.") to true })
@@ -119,6 +141,9 @@ class Assistant(
         .addTool(startTaskTool)
         .addTool(replyTool)
         .addTool(addRepoTool)
+        .addTool(statusTool)
+        .addTool(stopTool)
+        .addTool(mergeTool)
         .messages(history.toList())
         .build()
 
@@ -151,6 +176,9 @@ class Assistant(
         private const val START_TASK = "start_coding_task"
         private const val REPLY_TO_TASK = "reply_to_task"
         private const val ADD_REPO = "add_repo"
+        private const val GET_STATUS = "get_status"
+        private const val STOP_TASK = "stop_task"
+        private const val MERGE = "merge_pull_request"
 
         private const val MEMORY_INTRO =
             "Your earlier conversations with the driver, from past drives, oldest first. Use them when the driver " +
@@ -165,6 +193,11 @@ class Assistant(
             If the repo is unclear, ask which one, naming at most three.
             When the driver asks to add a repo, call add_repo with the name as they said it, then say which repo
             was added. If it didn't work, read back the reason briefly.
+            When the driver asks how something is going, such as a task, a pull request's checks or a repo, call
+            get_status and sum up the answer in a sentence or two. When they ask to stop a task, call stop_task.
+            To merge a pull request, call merge_pull_request without confirmed first, read back what it says and
+            ask the driver to confirm. Only call it again with confirmed true after the driver says yes. Never
+            merge on your own initiative.
         """.trimIndent()
 
         private val startTaskTool = Tool.builder()
@@ -214,6 +247,60 @@ class Assistant(
             )
             .build()
 
+        private val statusTool = Tool.builder()
+            .name(GET_STATUS)
+            .description(
+                "Check where things stand: a task, a pull request and its checks, or a repo's main branch and open pull requests. " +
+                    "With no arguments, lists the tasks that are still going.",
+            )
+            .inputSchema(
+                Tool.InputSchema.builder()
+                    .properties(
+                        Tool.InputSchema.Properties.builder()
+                            .putAdditionalProperty("task_id", stringProp("A task id from the recent tasks list, if the driver means a task."))
+                            .putAdditionalProperty("repo", stringProp("The repo as owner/name or as the driver said it, if they named one."))
+                            .putAdditionalProperty("pr_number", intProp("The pull request number, if the driver said one."))
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build()
+
+        private val stopTool = Tool.builder()
+            .name(STOP_TASK)
+            .description("Stop a task Claude is working on. With no task id, stops the only running task.")
+            .inputSchema(
+                Tool.InputSchema.builder()
+                    .properties(
+                        Tool.InputSchema.Properties.builder()
+                            .putAdditionalProperty("task_id", stringProp("The task id from the recent tasks list."))
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build()
+
+        private val mergeTool = Tool.builder()
+            .name(MERGE)
+            .description(
+                "Merge a pull request. Call it first without confirmed to check it and get a question for the driver. " +
+                    "Call it again with confirmed true only after the driver said yes to that question.",
+            )
+            .inputSchema(
+                Tool.InputSchema.builder()
+                    .properties(
+                        Tool.InputSchema.Properties.builder()
+                            .putAdditionalProperty("repo", stringProp("The repo as owner/name or as the driver said it. Leave out if unclear."))
+                            .putAdditionalProperty("pr_number", intProp("The pull request number."))
+                            .putAdditionalProperty("confirmed", JsonValue.from(mapOf("type" to "boolean", "description" to "True only once the driver said yes.")))
+                            .build(),
+                    )
+                    .build(),
+            )
+            .build()
+
+        private fun intProp(description: String) = JsonValue.from(mapOf("type" to "integer", "description" to description))
+
         private fun stringProp(description: String) = JsonValue.from(mapOf("type" to "string", "description" to description))
 
         private fun defaultClient(key: String): AnthropicClient = AnthropicOkHttpClient.builder()
@@ -242,4 +329,36 @@ class Assistant(
             append(clean)
         }
     }
+}
+
+/**
+ * Merging by voice takes two tool calls in different turns: the first describes the pull request and asks the driver,
+ * and only a call after the driver spoke again, for the same pull request, merges it. A misheard "merge" or an
+ * eager model can't merge anything on its own.
+ */
+internal class MergeConfirmation(private val actions: AssistantActions) {
+    /** A merge described to the driver, and the turn it was described in. */
+    private var pending: Pair<MergePreview, Int>? = null
+
+    fun clear() { pending = null }
+
+    fun handle(repo: String, prNumber: Int?, confirmed: Boolean, turn: Int): String {
+        val waiting = pending
+        if (confirmed && waiting != null && waiting.second < turn && sameTarget(waiting.first, repo, prNumber)) {
+            pending = null
+            return actions.merge(waiting.first.repo, waiting.first.number)
+        }
+        val preview = actions.previewMerge(repo, prNumber)
+        if (!preview.ready) {
+            pending = null
+            return "${preview.summary} It can't merge right now. Tell the driver why in a sentence."
+        }
+        pending = preview to turn
+        return "${preview.summary} Not merged yet. Ask the driver to confirm merging pull request ${preview.number} in ${preview.repo.name}, " +
+            "and only after they say yes, call merge_pull_request again with confirmed true."
+    }
+
+    private fun sameTarget(preview: MergePreview, repo: String, prNumber: Int?): Boolean =
+        (prNumber == null || prNumber == preview.number) &&
+            (repo.isBlank() || repo.equals(preview.repo.fullName, ignoreCase = true) || RepoRef.matchSpoken(repo, listOf(preview.repo)).isNotEmpty())
 }
