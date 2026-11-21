@@ -40,9 +40,13 @@ class Assistant(
     private val canSpend: () -> Boolean = { true },
     private val onSpend: (Double) -> Unit = {},
     private val profile: () -> ChatProfile = { ChatProfile() },
+    private val memory: () -> ChatMemory = { NoChatMemory },
+    private val clock: () -> Long = System::currentTimeMillis,
     private val clientFactory: (String) -> AnthropicClient = ::defaultClient,
 ) {
     private val history = mutableListOf<MessageParam>()
+    /** Exchanges remembered before this start are from earlier drives, so they go in the system prompt. */
+    private var startedMillis = clock()
     private var client: AnthropicClient? = null
     private var clientKey: String? = null
 
@@ -54,7 +58,9 @@ class Assistant(
         return try {
             val claude = clientFor(key)
             history += MessageParam.ofUser(spoken)
-            converse(claude)
+            converse(claude).also { reply ->
+                runCatching { memory().remember(ChatExchange(spoken, reply, clock())) }
+            }
         } catch (e: Throwable) {
             // Drop the half-finished turn so the next question starts from a clean history.
             while (history.size > start) history.removeAt(history.size - 1)
@@ -64,7 +70,10 @@ class Assistant(
 
     /** Forgets the conversation, e.g. when the driver starts over. */
     @Synchronized
-    fun reset() = history.clear()
+    fun reset() {
+        history.clear()
+        startedMillis = clock()
+    }
 
     private fun converse(claude: AnthropicClient): String {
         val spoken = StringBuilder()
@@ -106,12 +115,18 @@ class Assistant(
         .maxTokens(MAX_TOKENS)
         // Low effort by default keeps replies quick, which matters more than depth while driving.
         .outputConfig(OutputConfig.builder().effort(effort(chat.effort)).build())
-        .system(SYSTEM + "\n\nCurrent state of the app:\n" + actions.context())
+        .system(system())
         .addTool(startTaskTool)
         .addTool(replyTool)
         .addTool(addRepoTool)
         .messages(history.toList())
         .build()
+
+    private fun system(): String {
+        val earlier = runCatching { ChatMemory.describe(memory().recent(), startedMillis, clock()) }.getOrNull()
+        return SYSTEM + "\n\nCurrent state of the app:\n" + actions.context() +
+            (earlier?.let { "\n\n$MEMORY_INTRO\n$it" } ?: "")
+    }
 
     /** Keeps the conversation short. Only cuts right before a plain spoken question, so tool calls stay paired. */
     private fun trimHistory() {
@@ -136,6 +151,10 @@ class Assistant(
         private const val START_TASK = "start_coding_task"
         private const val REPLY_TO_TASK = "reply_to_task"
         private const val ADD_REPO = "add_repo"
+
+        private const val MEMORY_INTRO =
+            "Your earlier conversations with the driver, from past drives, oldest first. Use them when the driver " +
+                "refers back to something, but don't bring them up unprompted:"
 
         private val SYSTEM = """
             You are Claude, talking with the driver through their car's speakers. Everything you write is read

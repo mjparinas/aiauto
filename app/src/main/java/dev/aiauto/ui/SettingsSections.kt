@@ -14,7 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.SmartToy
@@ -216,5 +220,46 @@ internal fun VoiceRows(
             ) { onVoice(it?.name); onPreview() }
         }
         null -> Unit
+    }
+}
+
+/** Hands-free start, the welcome-back briefing, and memory across drives, in the "In the car" card. */
+@Composable
+internal fun CarStartRows(
+    listenOnOpen: Boolean,
+    briefing: Boolean,
+    rememberOn: Boolean,
+    onListenOnOpen: (Boolean) -> Unit,
+    onBriefing: (Boolean) -> Unit,
+    onRemember: (Boolean) -> Unit,
+    onForget: () -> Unit,
+) {
+    var confirmForget by remember { mutableStateOf(false) }
+    SwitchRow(
+        Icons.Rounded.Mic, BadgeHue.Red, "Listen when opened",
+        "Starts listening as soon as Cruise Control opens in the car, so \"Hey Google, open Cruise Control\" is all it takes.",
+        listenOnOpen, onListenOnOpen,
+    )
+    SwitchRow(
+        Icons.Rounded.WbSunny, BadgeHue.Amber, "Briefing when you get in",
+        "When the phone connects to the car, reads what happened since your last drive: finished and failed tasks, merges, questions waiting for you and today's spending.",
+        briefing, onBriefing,
+    )
+    SwitchRow(
+        Icons.Rounded.History, BadgeHue.Blue, "Remember past drives",
+        "The car chat keeps your last 20 exchanges, so you can pick up where you left off.",
+        rememberOn, onRemember,
+    )
+    SettingRow(Icons.Rounded.DeleteSweep, BadgeHue.Red, "Forget past drives", "Clears what the car chat remembers") { confirmForget = true }
+
+    if (confirmForget) {
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            shape = RoundedCornerShape(28.dp),
+            title = { Text("Forget past drives?") },
+            text = { Text("The car chat won't remember anything you said before now.") },
+            confirmButton = { TextButton(onClick = { onForget(); confirmForget = false }) { Text("Forget") } },
+            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
+        )
     }
 }

@@ -107,6 +107,9 @@ data class SettingsState(
     val chatProfile: dev.aiauto.core.ChatProfile = dev.aiauto.core.ChatProfile(),
     val speechRate: Float = 1f,
     val voiceName: String? = null,
+    val listenOnOpen: Boolean = true,
+    val briefing: Boolean = true,
+    val rememberChats: Boolean = true,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -141,6 +144,10 @@ fun SettingsScreen(
     onSpeechRate: (Float) -> Unit = {},
     onVoice: (String?) -> Unit = {},
     onPreviewVoice: () -> Unit = {},
+    onListenOnOpen: (Boolean) -> Unit = {},
+    onBriefing: (Boolean) -> Unit = {},
+    onRememberChats: (Boolean) -> Unit = {},
+    onForgetChats: () -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -210,6 +217,10 @@ fun SettingsScreen(
                     state.quietMode, onQuietMode,
                 )
                 VoiceRows(state.speechRate, state.voiceName, voices, onSpeechRate, onVoice, onPreviewVoice)
+                CarStartRows(
+                    state.listenOnOpen, state.briefing, state.rememberChats,
+                    onListenOnOpen, onBriefing, onRememberChats, onForgetChats,
+                )
             }
 
             ClaudeSettingsSection(state.agentProfile, state.chatProfile, onAgentProfile, onChatProfile)

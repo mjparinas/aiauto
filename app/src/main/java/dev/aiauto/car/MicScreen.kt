@@ -36,13 +36,36 @@ class MicScreen(carContext: CarContext) : Screen(carContext) {
 
     private enum class State { Idle, Listening, Thinking }
 
+    private var opened = false
+
     init {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                if (opened) return
+                opened = true
+                greet()
+            }
             override fun onStop(owner: LifecycleOwner) {
                 if (state == State.Listening) stopListening()
             }
             override fun onDestroy(owner: LifecycleOwner) = voice.cancel()
         })
+    }
+
+    /**
+     * When the screen first opens: read the welcome-back briefing if there is one, then listen, so opening the app
+     * by voice ("Hey Google, open Cruise Control") is enough to start talking.
+     */
+    private fun greet() {
+        if (!g.isConfigured) return
+        val listen = g.settings.listenOnOpen
+        val briefing = g.takeBriefing()
+        if (briefing == null) {
+            if (listen) talk()
+            return
+        }
+        show(State.Idle, briefing)
+        runCatching { g.speaker.speak(briefing) { if (listen) lifecycleScope.launch { listenForReply(briefing) } } }
     }
 
     private fun talk() {
