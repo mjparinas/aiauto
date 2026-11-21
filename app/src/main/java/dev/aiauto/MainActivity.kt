@@ -233,6 +233,21 @@ class MainActivity : ComponentActivity() {
                         onBriefing = { g.settings.briefingOnConnect = it; settings = settings.copy(briefing = it) },
                         onRememberChats = { g.settings.rememberChats = it; settings = settings.copy(rememberChats = it) },
                         onForgetChats = { g.chatMemory.forget(); settings = settings.copy(message = "The car chat forgot your past drives.") },
+                        onSyncEnabled = { on ->
+                            g.settings.syncEnabled = on
+                            settings = settings.copy(syncEnabled = on, message = if (on) "Syncing…" else "Sync is off.")
+                            if (on) scope.launch {
+                                val result = g.sync.syncNow()
+                                settings = settings.copy(message = result, syncStatus = syncStatus())
+                            }
+                        },
+                        onSyncNow = {
+                            settings = settings.copy(busy = true, message = "Syncing…")
+                            scope.launch {
+                                val result = g.sync.syncNow()
+                                settings = settings.copy(busy = false, message = result, syncStatus = syncStatus())
+                            }
+                        },
                         onCheckUpdate = {
                             settings = settings.copy(busy = true, message = "Checking for updates…")
                             android.widget.Toast.makeText(this, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
@@ -253,6 +268,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Pull request state and checks change on GitHub while the app is closed.
         graph.engine.refreshPullRequests()
+        graph.sync.syncSoon()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -282,7 +298,18 @@ class MainActivity : ComponentActivity() {
         listenOnOpen = graph.settings.listenOnOpen,
         briefing = graph.settings.briefingOnConnect,
         rememberChats = graph.settings.rememberChats,
+        syncEnabled = graph.settings.syncEnabled,
+        syncStatus = syncStatus(),
     )
+
+    private fun syncStatus(): String {
+        graph.settings.lastSyncError?.let { return it }
+        val last = graph.settings.lastSyncMillis
+        if (last == 0L) return "Not synced yet"
+        return "Last synced " + android.text.format.DateUtils.getRelativeTimeSpanString(
+            last, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS,
+        )
+    }
 
     private inline fun <reified E : Enum<E>> enumOrDefault(name: String, default: E): E =
         enumValues<E>().firstOrNull { it.name == name } ?: default

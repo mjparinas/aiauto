@@ -34,6 +34,7 @@ class TaskEngineTest {
         override fun quietMode() = quiet
         var profile = AgentProfile()
         override fun agentProfile() = profile
+        override fun deviceId() = "phone"
     }
 
     /** Scripted Claude: each list entry is what one call does, then it behaves normally. */
@@ -133,6 +134,18 @@ class TaskEngineTest {
         assertEquals("env", claude.lastExisting?.environmentId)
         engine().start(repo, "third")
         assertEquals(1, claude.setupsCreated)
+    }
+
+    @Test fun leavesTasksFromOtherDevicesAloneUntilYouReply() {
+        val now = System.currentTimeMillis()
+        store.put(Task("t1", repo, "other", "b", sessionId = "s", status = TaskStatus.Working, createdMillis = now, updatedMillis = now, device = "tablet"))
+        val engine = engine()
+        engine.resumeAll()
+        assertEquals(0, claude.sent.size)
+        assertEquals("tablet", store.get("t1")!!.device)
+        engine.prompt("t1", "carry on")
+        assertEquals("phone", store.get("t1")!!.device)
+        assertEquals(1, claude.sent.size)
     }
 
     @Test fun recreatesAMissingAgentSetupOnce() {

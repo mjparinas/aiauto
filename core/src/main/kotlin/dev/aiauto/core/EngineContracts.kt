@@ -15,6 +15,9 @@ interface EngineConfig {
     fun agentSetup(): AgentSetup?
     fun saveAgentSetup(setup: AgentSetup)
 
+    /** This device's id when tasks sync between devices, or null when they don't. */
+    fun deviceId(): String? = null
+
     /** The model, effort, web search and standing rules new tasks should use. */
     fun agentProfile(): AgentProfile = AgentProfile()
 

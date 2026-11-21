@@ -84,7 +84,8 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
    account. Tasks use Claude Opus 5.5 by default, and each task is a Managed Agents session.
 3. **GitHub token.** Create a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for
    the repos you want to use. Set **Contents** and **Pull requests** to read and write, and **Checks** and
-   **Commit statuses** to read. To let GitHub merge on its own, turn on **Allow auto-merge** in the repo's settings.
+   **Commit statuses** to read. For sync across devices, also set the account permission **Gists** to read and
+   write. To let GitHub merge on its own, turn on **Allow auto-merge** in the repo's settings.
 4. **Settings in the app.** Paste both, then add repos as `owner/name`. The key and token are encrypted with the
    Android Keystore. The GitHub token is also sent to Anthropic for each session, so the sandbox can clone and
    push. Anthropic's proxy adds the token to git requests outside the sandbox, so code running in the sandbox
@@ -119,6 +120,18 @@ Anything longer goes to Claude as usual, so "merge the two settings screens" is 
   to Claude at the start of the next drive. **Forget past drives** clears them.
 - **Speaking speed and voice** are under In the car. The voice list shows the phone's text-to-speech voices for its
   language, and a sample plays when you pick one.
+
+## Sync across devices
+
+Turn on **Sync across devices** in Settings on each phone or tablet. They share one secret gist named
+`cruise-control-sync.json` on the GitHub account of the token, which holds your repos, tasks (with their last 60
+messages), settings and the car chat's memory. The API key, GitHub token, voice, spending total and agent setup stay
+on each device. Add **Gists: read and write** to the token's account permissions first.
+
+The app syncs every three minutes while it runs, 20 seconds after a task changes, when it opens, and from **Sync
+now**. A task keeps running on the device that started it: other devices show it but don't follow its session or
+merge its pull request, until you reply to it or retry it from one of them, which moves it there. When both
+devices changed a task, the newer one wins and messages from both are kept. Settings work the same way as a whole.
 
 ## Building locally
 

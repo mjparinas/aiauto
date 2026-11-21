@@ -86,6 +86,12 @@ class FileChatMemory(context: Context) : dev.aiauto.core.ChatMemory {
 
     @Synchronized
     override fun forget() = list.set(emptyList())
+
+    /** Replaces everything with [exchanges], for sync. */
+    @Synchronized
+    fun replaceAll(exchanges: List<dev.aiauto.core.ChatExchange>) {
+        if (exchanges != list.flow.value) list.set(exchanges)
+    }
 }
 
 /** Saved task templates. A new install starts with [TaskTemplate.defaults]; deleting them all keeps the list empty. */
@@ -108,6 +114,79 @@ class TemplateStore(context: Context) {
 /** Non-secret settings, plus the agent setup tied to the current API key. */
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    @Volatile private var importing = false
+
+    // Kept in a field: SharedPreferences only holds listeners weakly.
+    private val syncedChange = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (!importing && key in SYNCED_KEYS) prefs.edit().putLong("settings_changed", System.currentTimeMillis()).apply()
+    }
+
+    init {
+        prefs.registerOnSharedPreferenceChangeListener(syncedChange)
+    }
+
+    // ---- Sync ------------------------------------------------------------------------------------------------
+
+    /** A random id for this install, so synced tasks know which device runs them. */
+    val deviceId: String
+        @Synchronized get() = prefs.getString("device_id", null)
+            ?: java.util.UUID.randomUUID().toString().take(12).also { prefs.edit().putString("device_id", it).apply() }
+
+    var syncEnabled: Boolean
+        get() = prefs.getBoolean("sync_enabled", false)
+        set(value) = prefs.edit().putBoolean("sync_enabled", value).apply()
+
+    var syncGistId: String?
+        get() = prefs.getString("sync_gist", null)
+        set(value) = prefs.edit().apply { if (value == null) remove("sync_gist") else putString("sync_gist", value) }.apply()
+
+    var lastSyncMillis: Long
+        get() = prefs.getLong("last_sync", 0L)
+        set(value) = prefs.edit().putLong("last_sync", value).apply()
+
+    var lastSyncError: String?
+        get() = prefs.getString("last_sync_error", null)
+        set(value) = prefs.edit().apply { if (value == null) remove("last_sync_error") else putString("last_sync_error", value) }.apply()
+
+    /** When a setting that syncs last changed on this device, or came in from another one. */
+    val settingsChangedMillis: Long get() = prefs.getLong("settings_changed", 0L)
+
+    /** The settings that sync, each as a type letter and its value, like "b:true". */
+    fun exportSynced(): Map<String, String> = prefs.all.filterKeys { it in SYNCED_KEYS }.mapNotNull { (key, value) ->
+        when (value) {
+            is Boolean -> key to "b:$value"
+            is Float -> key to "f:$value"
+            is Long -> key to "l:$value"
+            is Int -> key to "i:$value"
+            is String -> key to "s:$value"
+            else -> null
+        }
+    }.toMap()
+
+    /** Applies settings from another device. Settings missing from [values] go back to their defaults. */
+    @Synchronized
+    fun importSynced(values: Map<String, String>, changedMillis: Long) {
+        importing = true
+        try {
+            val edit = prefs.edit()
+            SYNCED_KEYS.filter { it !in values }.forEach { edit.remove(it) }
+            values.filterKeys { it in SYNCED_KEYS }.forEach { (key, encoded) ->
+                val v = encoded.substringAfter(':')
+                when (encoded.substringBefore(':')) {
+                    "b" -> edit.putBoolean(key, v.toBoolean())
+                    "f" -> v.toFloatOrNull()?.let { edit.putFloat(key, it) }
+                    "l" -> v.toLongOrNull()?.let { edit.putLong(key, it) }
+                    "i" -> v.toIntOrNull()?.let { edit.putInt(key, it) }
+                    "s" -> edit.putString(key, v)
+                }
+            }
+            edit.putLong("settings_changed", changedMillis)
+            edit.commit()
+        } finally {
+            importing = false
+        }
+    }
 
     var readAloudInCar: Boolean
         get() = prefs.getBoolean("read_aloud", true)
@@ -231,5 +310,15 @@ class Settings(context: Context) {
 
     companion object {
         const val DEFAULT_DAILY_LIMIT = 20.0
+
+        /**
+         * Settings that are the same on every device. Left out: the voice (each phone has its own), spending and
+         * drive times (counted per device), the agent setup (tied to each device's key), and sync itself.
+         */
+        val SYNCED_KEYS = setOf(
+            "read_aloud", "theme_mode", "accent", "quiet_mode", "daily_limit", "auto_merge", "auto_fix_checks",
+            "auto_fix_conflicts", "auto_release_since", "agent_profile", "chat_model", "chat_effort", "speech_rate",
+            "listen_on_open", "briefing", "remember_chats",
+        )
     }
 }

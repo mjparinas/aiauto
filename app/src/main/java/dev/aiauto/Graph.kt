@@ -51,6 +51,7 @@ class Graph(context: Context) {
             override fun agentSetup() = settings.agentSetup
             override fun saveAgentSetup(setup: AgentSetup) { settings.agentSetup = setup }
             override fun agentProfile() = settings.agentProfile
+            override fun deviceId() = settings.deviceId
             override fun quietMode() = settings.quietMode
             override fun dailyLimitUsd() = settings.dailyLimitUsd
             override fun spentTodayUsd() = settings.spentTodayUsd
@@ -167,6 +168,9 @@ class Graph(context: Context) {
             takeBriefing()?.let { if (settings.readAloudInCar && speaker.inCar) speaker.speak(it) }
         }
     }
+
+    /** Keeps repos, tasks and settings the same on every device signed in to the same GitHub account. */
+    val sync = dev.aiauto.data.SyncManager(settings, secrets, tasks, repos, chatMemory, scope)
 
     /** Each repo's status straight from GitHub, for the project screens on the phone and in the car. */
     val projects = Projects(githubToken = { secrets.githubToken }, scope = scope)

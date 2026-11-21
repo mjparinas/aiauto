@@ -55,6 +55,12 @@ class TaskEngine(
 
     fun isRunning(taskId: String) = running[taskId]?.isActive == true
 
+    /** Tasks this device runs. With sync, tasks another device started are only shown here, not followed. */
+    private fun mine(): List<Task> {
+        val me = config.deviceId()
+        return store.all().filter { it.device == null || it.device == me }
+    }
+
     // ---- Task lifecycle ------------------------------------------------------------------------
 
     /** Starts a new task on [repo] from a spoken or typed [request]. Returns the new task. */
@@ -68,6 +74,7 @@ class TaskEngine(
             branch = "claude/${slug(request)}-$id",
             createdMillis = now,
             updatedMillis = now,
+            device = config.deviceId(),
         )
         store.put(task)
         journal.append(id, Speaker.You, request)
@@ -154,12 +161,12 @@ class TaskEngine(
 
     /** Re-attaches to tasks that were mid-turn when the app was closed, and to tasks cut off by a lost connection. */
     fun resumeAll() {
-        store.all().filter { it.isActive }.forEach { retry(it.id) }
+        mine().filter { it.isActive }.forEach { retry(it.id) }
     }
 
     /** Call when the phone gets a working network again. Resumes tasks that stopped because it was lost. */
     fun onNetworkAvailable() {
-        store.all().filter { it.status == TaskStatus.Failed && it.interrupted }.forEach { retry(it.id) }
+        mine().filter { it.status == TaskStatus.Failed && it.interrupted }.forEach { retry(it.id) }
     }
 
     /**
@@ -169,7 +176,7 @@ class TaskEngine(
      */
     fun resumeInterrupted() {
         val now = clock()
-        store.all()
+        mine()
             .filter { waitingToReconnect(it, now) && now - it.updatedMillis >= RESUME_INTERVAL_MILLIS }
             .forEach { launchTurn(it.id) }
     }
@@ -177,7 +184,7 @@ class TaskEngine(
     /** True while some task is cut off and still being retried, so the app should stay awake. */
     fun isReconnecting(): Boolean {
         val now = clock()
-        return store.all().any { waitingToReconnect(it, now) }
+        return mine().any { waitingToReconnect(it, now) }
     }
 
     private fun waitingToReconnect(task: Task, now: Long): Boolean =
@@ -318,12 +325,12 @@ class TaskEngine(
     /** True while some pull request's checks or merge are worth watching, so the app should stay awake. */
     fun isWatchingPullRequests(): Boolean {
         val now = clock()
-        return store.all().any { !isRunning(it.id) && pullRequests.needsWatching(it, now) }
+        return mine().any { !isRunning(it.id) && pullRequests.needsWatching(it, now) }
     }
 
     /** Refreshes state and checks for every task with an open pull request, and merges green ones when auto-merge is on. */
     fun refreshPullRequests(): Job = scope.launch(dispatcher) {
-        store.all().filter { it.hasOpenPr && !isRunning(it.id) }.forEach { task ->
+        mine().filter { it.hasOpenPr && !isRunning(it.id) }.forEach { task ->
             currentCoroutineContext().ensureActive()
             runCatching { pullRequests.refresh(task.id) }
         }
@@ -345,7 +352,9 @@ class TaskEngine(
     private fun launchTurn(taskId: String) {
         running.remove(taskId)?.cancel()
         stuckAlerted -= taskId
-        journal.update(taskId) { it.copy(status = TaskStatus.Working, interrupted = false) }
+        // Running a turn here makes this device the one that follows the task from now on.
+        val me = config.deviceId()
+        journal.update(taskId) { it.copy(status = TaskStatus.Working, interrupted = false, device = me ?: it.device) }
         val job = scope.launch(dispatcher, start = CoroutineStart.LAZY) {
             val key = config.anthropicKey()
             if (key == null) {
