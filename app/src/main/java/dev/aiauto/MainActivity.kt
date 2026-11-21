@@ -201,6 +201,10 @@ class MainActivity : ComponentActivity() {
                         onAutoMerge = { g.settings.autoMerge = it; settings = settings.copy(autoMerge = it) },
                         onAutoFixChecks = { g.settings.autoFixChecks = it; settings = settings.copy(autoFixChecks = it) },
                         onAutoFixConflicts = { g.settings.autoFixConflicts = it; settings = settings.copy(autoFixConflicts = it) },
+                        onAutoRelease = {
+                            g.settings.autoReleaseSince = if (it) System.currentTimeMillis() else null
+                            settings = settings.copy(autoRelease = it)
+                        },
                         onThemeMode = { g.settings.themeMode = it.name; themeMode = it },
                         onAccent = { g.settings.accent = it.name; accent = it },
                         onDailyLimit = {
@@ -243,6 +247,7 @@ class MainActivity : ComponentActivity() {
         autoMerge = graph.settings.autoMerge,
         autoFixChecks = graph.settings.autoFixChecks,
         autoFixConflicts = graph.settings.autoFixConflicts,
+        autoRelease = graph.settings.autoReleaseSince != null,
         dailyLimitUsd = graph.settings.dailyLimitUsd,
         spentTodayUsd = graph.settings.spentTodayUsd,
         version = (application as AiAutoApp).updater.currentVersion,

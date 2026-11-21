@@ -74,6 +74,17 @@ object Versions {
         version.trim().removePrefix("v").removePrefix("V").substringBefore('-').substringBefore('+')
             .split('.').map { part -> part.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
 
+    /** The next patch version after the highest x.y.z tag, keeping its v prefix. v0.1.0 when there are none. */
+    fun nextPatch(tags: List<String>): String {
+        val semver = Regex("""^v?(\d+)\.(\d+)\.(\d+)$""")
+        val latest = tags.mapNotNull { tag -> semver.matchEntire(tag)?.let { tag to it.groupValues.drop(1).map(String::toInt) } }
+            .maxWithOrNull(compareBy({ it.second[0] }, { it.second[1] }, { it.second[2] }))
+            ?: return "v0.1.0"
+        val (major, minor, patch) = latest.second
+        val prefix = if (latest.first.startsWith("v")) "v" else ""
+        return "$prefix$major.$minor.${patch + 1}"
+    }
+
     fun isNewer(candidate: String, current: String): Boolean {
         val a = parse(candidate)
         val b = parse(current)

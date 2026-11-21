@@ -26,6 +26,8 @@ data class PullRequest(
     @SerialName("node_id") val nodeId: String = "",
     val head: Head = Head(),
     @SerialName("auto_merge") val autoMerge: kotlinx.serialization.json.JsonElement? = null,
+    @SerialName("merged_at") val mergedAt: String? = null,
+    @SerialName("merge_commit_sha") val mergeCommitSha: String? = null,
 ) {
     @Serializable
     data class Head(val sha: String = "", val ref: String = "")
@@ -139,6 +141,29 @@ open class GitHub(private val token: String, private val http: OkHttpClient = Ok
     open fun openPull(repo: RepoRef, branch: String, title: String, body: String): PullRequest {
         val payload = json.encodeToString(NewPull.serializer(), NewPull(title, branch, repo.defaultBranch, body))
         return json.decodeFromString(send("POST", "/repos/${repo.fullName}/pulls", payload))
+    }
+
+    @Serializable
+    private data class TagJson(val name: String)
+
+    @Serializable
+    private data class NewRelease(
+        @SerialName("tag_name") val tagName: String,
+        @SerialName("target_commitish") val target: String,
+        val name: String,
+        @SerialName("generate_release_notes") val generateNotes: Boolean = true,
+    )
+
+    @Serializable
+    private data class ReleaseJson(@SerialName("tag_name") val tagName: String)
+
+    open fun tags(repo: RepoRef): List<String> =
+        json.decodeFromString<List<TagJson>>(get("/repos/${repo.fullName}/tags?per_page=100")).map { it.name }
+
+    /** Publishes a release, creating [tag] at [target] with GitHub's generated notes. Returns the tag. */
+    open fun createRelease(repo: RepoRef, tag: String, target: String): String {
+        val payload = json.encodeToString(NewRelease.serializer(), NewRelease(tag, target, tag))
+        return json.decodeFromString<ReleaseJson>(send("POST", "/repos/${repo.fullName}/releases", payload)).tagName
     }
 
     open fun pull(repo: RepoRef, number: Int): PullRequest =

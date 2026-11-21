@@ -120,6 +120,14 @@ Releases are signed with the key stored in the `RELEASE_KEYSTORE_BASE64`, `RELEA
 secrets are missing, the workflow falls back to a throwaway debug key and warns that the APK won't install over
 earlier releases.
 
+## Releasing when a PR is merged
+
+Turn on **Release when a PR is merged** in the app's Settings. The app keeps watching the pull requests it opened
+for a few hours. When one is merged, it publishes a GitHub release on that repo with the next patch
+version (for example `v1.2.3` becomes `v1.2.4`, or `v0.1.0` if the repo has no version tags) and generated notes,
+then tells you in the car. Only PRs merged after you turn the toggle on get a release. The GitHub token already
+has the Contents permission this needs.
+
 ## Limits worth knowing
 
 - There's no public API for your claude.ai or Claude app projects, so this app runs its own agent sessions through

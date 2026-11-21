@@ -32,4 +32,7 @@ interface EngineConfig {
 
     /** Ask Claude to resolve merge conflicts on its pull request without waiting for the driver. */
     fun autoFixConflicts(): Boolean = false
+
+    /** When auto-release was switched on, or null when it's off. Only pull requests merged after this get a release. */
+    fun autoReleaseSince(): Long? = null
 }

@@ -7,6 +7,13 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class UpdatesTest {
+    @Test fun picksTheNextPatchVersion() {
+        assertEquals("v0.4.5", Versions.nextPatch(listOf("v0.4.4", "v0.10.0-beta", "v0.3.9", "latest")))
+        assertEquals("v0.10.1", Versions.nextPatch(listOf("v0.9.9", "v0.10.0")))
+        assertEquals("1.2.4", Versions.nextPatch(listOf("1.2.3")))
+        assertEquals("v0.1.0", Versions.nextPatch(emptyList()))
+    }
+
     @Test fun comparesVersions() {
         assertTrue(Versions.isNewer("v0.2.1", "0.2.0"))
         assertTrue(Versions.isNewer("v0.10.0", "0.9.9"))

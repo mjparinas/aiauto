@@ -50,6 +50,7 @@ class Graph(context: Context) {
             override fun autoMerge() = settings.autoMerge
             override fun autoFixChecks() = settings.autoFixChecks
             override fun autoFixConflicts() = settings.autoFixConflicts
+            override fun autoReleaseSince() = settings.autoReleaseSince
         },
         scope = scope,
         onMessage = { task, message ->

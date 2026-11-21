@@ -88,6 +88,8 @@ data class Task(
     val status: TaskStatus = TaskStatus.Starting,
     val prUrl: String? = null,
     val prNumber: Int? = null,
+    /** The release the app published after this task's pull request was merged. */
+    val releaseTag: String? = null,
     val messages: List<TaskMessage> = emptyList(),
     val createdMillis: Long,
     val updatedMillis: Long,

@@ -111,6 +111,13 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("auto_fix_conflicts", true)
         set(value) = prefs.edit().putBoolean("auto_fix_conflicts", value).apply()
 
+    /** When auto-release was switched on, or null when it's off. */
+    var autoReleaseSince: Long?
+        get() = prefs.getLong("auto_release_since", 0L).takeIf { it > 0 }
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("auto_release_since") else putLong("auto_release_since", value)
+        }.apply()
+
     /** What Claude has cost today, by the phone's local date. Resets at midnight. */
     @get:Synchronized
     val spentTodayUsd: Double

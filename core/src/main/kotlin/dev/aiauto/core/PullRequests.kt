@@ -20,6 +20,8 @@ internal class PullRequests(
     fun needsWatching(task: Task, now: Long): Boolean {
         if (!task.hasOpenPr) return false
         if (now - (task.prOpenedMillis ?: task.updatedMillis) > WATCH_MILLIS) return false
+        // Someone may merge it by hand at any point, and that merge gets a release.
+        if (config.autoReleaseSince() != null) return true
         return when (task.checks?.state) {
             null, Checks.Pending, Checks.None -> true
             Checks.Passing -> config.autoMerge() || config.autoFixConflicts()
@@ -87,7 +89,10 @@ internal class PullRequests(
         val fixingConflicts = conflicts && !task.conflicts && conflictsFound(taskId, number)
         val beforeState = task.prState ?: PrState.Open
         when {
-            state == PrState.Merged && beforeState != PrState.Merged -> journal.status(taskId, "Pull request $number was merged.")
+            state == PrState.Merged && beforeState != PrState.Merged -> {
+                journal.status(taskId, "Pull request $number was merged.")
+                release(taskId, github, pr.mergedAt?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: clock(), pr.mergeCommitSha)
+            }
             state == PrState.Closed && beforeState != PrState.Closed -> journal.status(taskId, "Pull request $number was closed without merging.")
             state == PrState.Open && checks != null && checks.state != task.checks?.state -> when (checks.state) {
                 Checks.Failing -> {
@@ -117,10 +122,29 @@ internal class PullRequests(
             MergeResult.Merged, MergeResult.AutoMergeOn -> {
                 journal.update(taskId) { it.copy(prState = PrState.Merged) }
                 journal.status(taskId, "Merged pull request $number.")
+                if (result == MergeResult.Merged) release(taskId, github, clock(), null)
             }
             is MergeResult.Refused -> if (mergeRefusals.put(refusalKey, result.reason) == null) {
                 journal.status(taskId, "Couldn't merge pull request $number. ${result.reason}")
             }
+        }
+    }
+
+    /**
+     * Publishes a release with the next patch version when auto-release is on and the pull request was merged
+     * after it was switched on. Each task gets at most one release.
+     */
+    private fun release(taskId: String, github: GitHub, mergedMillis: Long, mergeSha: String?) {
+        val since = config.autoReleaseSince() ?: return
+        val task = store.get(taskId) ?: return
+        if (task.releaseTag != null || mergedMillis < since) return
+        runCatching {
+            github.createRelease(task.repo, Versions.nextPatch(github.tags(task.repo)), mergeSha ?: task.repo.defaultBranch)
+        }.onSuccess { tag ->
+            journal.update(taskId) { it.copy(releaseTag = tag) }
+            journal.status(taskId, "Released $tag.")
+        }.onFailure {
+            journal.status(taskId, "The release didn't work. ${Failures.describe(it)}")
         }
     }
 

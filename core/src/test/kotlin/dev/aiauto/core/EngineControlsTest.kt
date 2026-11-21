@@ -27,6 +27,7 @@ class EngineControlsTest {
         var merge = false
         var fixChecks = false
         var fixConflicts = false
+        var releaseSince: Long? = null
         override fun anthropicKey() = "key"
         override fun githubToken() = "token"
         override fun agentSetup() = AgentSetup("agent", 1, "env")
@@ -37,6 +38,7 @@ class EngineControlsTest {
         override fun autoMerge() = merge
         override fun autoFixChecks() = fixChecks
         override fun autoFixConflicts() = fixConflicts
+        override fun autoReleaseSince() = releaseSince
     }
 
     private class FakeClaude : AgentClient {
@@ -77,6 +79,13 @@ class EngineControlsTest {
         var autoMergeAllowed = false
         val merges = mutableListOf<Int>()
         var refuseMerge: String? = null
+        val releases = mutableListOf<Pair<String, String>>()
+
+        override fun tags(repo: RepoRef) = listOf("v0.4.4", "v0.3.9", "latest")
+        override fun createRelease(repo: RepoRef, tag: String, target: String): String {
+            releases += tag to target
+            return tag
+        }
 
         override fun branchExists(repo: RepoRef, branch: String) = this.branch
         override fun findPull(repo: RepoRef, branch: String): PullRequest? = null
@@ -226,6 +235,50 @@ class EngineControlsTest {
         assertTrue(said.any { it == "Merged pull request 7." })
         assertFalse(engine.isWatchingPullRequests())
         assertTrue(store.get(task.id)!!.isFinished)
+    }
+
+    @Test fun releasesAPullRequestMergedByHandWhenAutoReleaseIsOn() {
+        config.releaseSince = now - 1
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.checksResult = ChecksSummary(Checks.Passing, total = 1)
+        engine.refreshPullRequest(task.id)
+        assertTrue(engine.isWatchingPullRequests())
+
+        github.pr = github.pr.copy(merged = true, state = "closed", mergedAt = java.time.Instant.ofEpochMilli(now).toString(), mergeCommitSha = "def")
+        engine.refreshPullRequest(task.id)
+        engine.refreshPullRequest(task.id)
+        assertEquals(listOf("v0.4.5" to "def"), github.releases)
+        assertEquals("v0.4.5", store.get(task.id)!!.releaseTag)
+        assertTrue(said.any { it == "Released v0.4.5." })
+    }
+
+    @Test fun releasesAfterTheAppMergesWhenAutoReleaseIsOn() {
+        config.merge = true
+        config.releaseSince = now - 1
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.checksResult = ChecksSummary(Checks.Passing, total = 1)
+        engine.refreshPullRequest(task.id)
+        assertEquals(listOf(7), github.merges)
+        assertEquals(listOf("v0.4.5" to repo.defaultBranch), github.releases)
+    }
+
+    @Test fun noReleaseWhenOffOrMergedBeforeItWasOn() {
+        val engine = engine()
+        val task = engine.start(repo, "fix it")
+        github.pr = github.pr.copy(merged = true, state = "closed", mergedAt = java.time.Instant.ofEpochMilli(now).toString())
+        engine.refreshPullRequest(task.id)
+        assertTrue(github.releases.isEmpty())
+
+        github.pr = github.pr.copy(merged = false, state = "open")
+        val other = engine.start(repo, "another")
+        engine.refreshPullRequest(other.id)
+        config.releaseSince = now + 1
+        github.pr = github.pr.copy(merged = true, state = "closed")
+        engine.refreshPullRequest(other.id)
+        assertTrue(github.releases.isEmpty())
+        assertNull(store.get(other.id)!!.releaseTag)
     }
 
     @Test fun neverMergesFailingOrUnreadableChecks() {

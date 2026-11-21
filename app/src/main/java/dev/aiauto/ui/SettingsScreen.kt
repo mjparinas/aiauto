@@ -64,6 +64,7 @@ data class SettingsState(
     val autoMerge: Boolean,
     val autoFixChecks: Boolean,
     val autoFixConflicts: Boolean,
+    val autoRelease: Boolean,
     val dailyLimitUsd: Double?,
     val spentTodayUsd: Double,
     val version: String,
@@ -85,6 +86,7 @@ fun SettingsScreen(
     onAutoMerge: (Boolean) -> Unit,
     onAutoFixChecks: (Boolean) -> Unit,
     onAutoFixConflicts: (Boolean) -> Unit,
+    onAutoRelease: (Boolean) -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onAccent: (Accent) -> Unit,
     onDailyLimit: (Double?) -> Unit,
@@ -208,6 +210,17 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.autoFixChecks, onCheckedChange = onAutoFixChecks)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Release when a PR is merged", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "When a pull request from this app is merged, publishes a GitHub release with the next patch version, like v1.2.3 to v1.2.4.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = state.autoRelease, onCheckedChange = onAutoRelease)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
