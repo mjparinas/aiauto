@@ -66,6 +66,7 @@ data class SettingsState(
     val autoFixConflicts: Boolean,
     val dailyLimitUsd: Double?,
     val spentTodayUsd: Double,
+    val version: String,
     val themeMode: ThemeMode,
     val accent: Accent,
     val busy: Boolean = false,
@@ -87,6 +88,7 @@ fun SettingsScreen(
     onThemeMode: (ThemeMode) -> Unit,
     onAccent: (Accent) -> Unit,
     onDailyLimit: (Double?) -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
     var limitText by remember { mutableStateOf(state.dailyLimitUsd?.let { "%.2f".format(java.util.Locale.US, it).removeSuffix(".00") }.orEmpty()) }
     var anthropic by remember { mutableStateOf("") }
@@ -251,6 +253,11 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("About")
+            Text("Version ${state.version}", style = MaterialTheme.typography.bodyLarge)
+            OutlinedButton(onClick = onCheckUpdate, enabled = !state.busy) { Text("Check for updates") }
 
             state.message?.let {
                 Spacer(Modifier.height(4.dp))
