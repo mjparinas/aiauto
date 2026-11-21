@@ -1,6 +1,21 @@
 package dev.aiauto.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,6 +67,8 @@ data class SettingsState(
     val autoRelease: Boolean,
     val dailyLimitUsd: Double?,
     val spentTodayUsd: Double,
+    val themeMode: ThemeMode,
+    val accent: Accent,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -69,6 +86,8 @@ fun SettingsScreen(
     onAutoFixChecks: (Boolean) -> Unit,
     onAutoFixConflicts: (Boolean) -> Unit,
     onAutoRelease: (Boolean) -> Unit,
+    onThemeMode: (ThemeMode) -> Unit,
+    onAccent: (Accent) -> Unit,
     onDailyLimit: (Double?) -> Unit,
 ) {
     var limitText by remember { mutableStateOf(state.dailyLimitUsd?.let { "%.2f".format(java.util.Locale.US, it).removeSuffix(".00") }.orEmpty()) }
@@ -203,6 +222,25 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
+            Section("Appearance")
+            Text("Mode", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = state.themeMode == mode,
+                        onClick = { onThemeMode(mode) },
+                        label = { Text(mode.label) },
+                    )
+                }
+            }
+            Text("Accent color", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Accent.entries.forEach { accent ->
+                    AccentSwatch(accent, selected = state.accent == accent, onClick = { onAccent(accent) })
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline)
             Section("Spending")
             Text(
                 "Spent today: ${dev.aiauto.core.SpokenStatus.money(state.spentTodayUsd)}" +
@@ -238,6 +276,24 @@ fun SettingsScreen(
 @Composable
 private fun Section(title: String) =
     Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+@Composable
+private fun AccentSwatch(accent: Accent, selected: Boolean, onClick: () -> Unit) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val color = if (dark) accent.dark else accent.light
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(color)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onBackground, CircleShape) else Modifier)
+            .clickable(onClickLabel = accent.label, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = accent.label; this.selected = selected },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Icon(Icons.Rounded.Check, null, tint = if (dark) Color(0xFF1A1714) else Color.White, modifier = Modifier.size(20.dp))
+    }
+}
 
 @Composable
 private fun SecretField(label: String, saved: Boolean, value: String, onChange: (String) -> Unit, help: String) {
