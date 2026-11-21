@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.0
+
+- New app icon: a road-sign ring holding a terminal prompt, replacing the old sparkle. It is used for the launcher
+  icon (with a themed-icon version), the car screen and notifications.
+
 ## v0.5.0
 
 - Short spoken replies like status, stop, merge it, fix it, yes and no are handled by the app without starting a
