@@ -48,7 +48,7 @@ import dev.aiauto.core.TaskStatus
 fun StatusPill(status: TaskStatus, modifier: Modifier = Modifier, interrupted: Boolean = false) {
     val (label, color) = if (status == TaskStatus.Failed && interrupted) "Offline" to Color(0xFFB7791F) else when (status) {
         TaskStatus.Starting -> "Starting" to MaterialTheme.colorScheme.onSurfaceVariant
-        TaskStatus.Working -> "Working" to Clay
+        TaskStatus.Working -> "Working" to MaterialTheme.colorScheme.primary
         TaskStatus.NeedsInput -> "Needs you" to Color(0xFFB7791F)
         TaskStatus.Done -> "Done" to Color(0xFF4F7A55)
         TaskStatus.Failed -> "Stopped" to MaterialTheme.colorScheme.error
