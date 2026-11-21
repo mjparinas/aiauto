@@ -25,7 +25,6 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 
 /** App-wide objects. Created once in [AiAutoApp]. */
@@ -183,7 +182,7 @@ class Graph(context: Context) {
     fun watchWidget(context: Context) {
         val app = context.applicationContext
         scope.launch {
-            tasks.tasks.conflate().collect {
+            tasks.tasks.collect {
                 dev.aiauto.widget.TasksWidget.refresh(app)
                 delay(1_000)
             }
