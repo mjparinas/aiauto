@@ -61,6 +61,17 @@ data class ChecksSummary(
     val total: Int = 0,
 )
 
+/** Something worth interrupting the driver for, even in quiet mode. */
+@Serializable
+enum class AlertKind {
+    /** Checks failed on the task's pull request and Claude isn't already fixing them. */
+    ChecksFailed,
+    /** Claude finished its turn with a question for the driver. */
+    Question,
+    /** Claude has been working without a single update for a long time. */
+    Stuck,
+}
+
 /** Something the app asked the driver, waiting for a spoken yes or no. */
 @Serializable
 enum class PendingAction { Merge, FixChecks, FixConflicts }
